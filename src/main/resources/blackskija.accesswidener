@@ -1,0 +1,10 @@
+accessWidener v2 official
+
+# GpuDevice wraps the real backend (VulkanDevice / GlDevice) in a private final
+# field; VulkanSkijaBackend needs it to build the Skija DirectContext. Widening the
+# field replaces fragile dev-only reflection and works under intermediary mappings.
+accessible	field	com/mojang/blaze3d/systems/GpuDevice	backend	Lcom/mojang/blaze3d/systems/GpuDeviceBackend;
+
+# GlDevice (the GL GpuDeviceBackend impl) is package-private; SkijaBackend.active needs
+# it to detect GL vs Vulkan at runtime. (VulkanDevice is already public.)
+accessible	class	com/mojang/blaze3d/opengl/GlDevice

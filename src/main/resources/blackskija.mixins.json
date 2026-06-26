@@ -1,0 +1,12 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "org.blackaddons.blackskija.mixin",
+  "client": [
+    "GuiRendererMixin",
+    "GuiItemCaptureMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
