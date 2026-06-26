@@ -1,0 +1,15 @@
+package org.blackaddons.blackskija.demo
+
+import net.minecraft.network.chat.Component
+import org.blackaddons.blackskija.api.SkijaScreen
+
+/**
+ * The [SkijaDemo] showcase hosted as a real [SkijaScreen] — opens like a menu, closes on
+ * ESC. Demonstrates the host path (vs the over-gameplay overlay).
+ */
+class SkijaDemoScreen : SkijaScreen(Component.literal("BlackSkija Demo")) {
+
+    override fun draw() {
+        SkijaDemo.draw()
+    }
+}

@@ -1,0 +1,81 @@
+package org.blackaddons.blackskija.api
+
+import com.mojang.blaze3d.textures.GpuTextureView
+import net.minecraft.client.Minecraft
+import net.minecraft.client.gui.navigation.ScreenRectangle
+import net.minecraft.client.renderer.item.TrackingItemStackRenderState
+import net.minecraft.client.renderer.state.gui.GuiItemRenderState
+import net.minecraft.client.renderer.state.gui.GuiRenderState
+import net.minecraft.world.item.ItemDisplayContext
+import net.minecraft.world.item.ItemStack
+import org.blackaddons.blackskija.backend.SkijaBackend
+import org.joml.Matrix3x2f
+import java.awt.Color
+import java.util.Collections
+import java.util.IdentityHashMap
+import kotlin.math.abs
+
+object SkijaItems {
+
+    private class Slot(val view: GpuTextureView, val u0: Float, val v0: Float, val u1: Float, val v1: Float)
+
+    private var renderState: GuiRenderState? = null
+    private val captured = HashMap<Any, Slot>()
+    private val ourStates: MutableSet<GuiItemRenderState> =
+        Collections.newSetFromMap(IdentityHashMap())
+    private val requestedThisFrame = HashSet<Any>()
+
+    fun beginFrame(state: GuiRenderState) {
+        renderState = state
+        ourStates.clear()
+        requestedThisFrame.clear()
+    }
+
+    fun endFrame() {
+        renderState = null
+        captured.keys.retainAll(requestedThisFrame)
+    }
+
+    fun capture(state: GuiItemRenderState, view: GpuTextureView, u0: Float, v0: Float, u1: Float, v1: Float): Boolean {
+        if (state !in ourStates) return false
+        val id = state.itemStackRenderState().modelIdentity
+        captured[id] = Slot(view, u0, v0, u1, v1)
+        return true
+    }
+
+    fun draw(stack: ItemStack, x: Number, y: Number, w: Number, h: Number, radius: Number = 0, tint: Color? = null) {
+        val rs = renderState ?: return
+        val mc = Minecraft.getInstance()
+
+        val state = TrackingItemStackRenderState()
+        mc.itemModelResolver.updateForTopItem(state, stack, ItemDisplayContext.GUI, mc.level, mc.player, 0)
+        val id = state.modelIdentity
+        requestedThisFrame.add(id)
+
+        val slot = captured[id]
+        if (slot != null && !slot.view.isClosed) {
+            SkijaBackend.active?.wrapTexture(slot.view, premultiplied = true)?.use { img ->
+                val tw = img.width.toFloat()
+                val th = img.height.toFloat()
+                val sx = minOf(slot.u0, slot.u1) * tw
+                val sy = minOf(slot.v0, slot.v1) * th
+                val sw = abs(slot.u1 - slot.u0) * tw
+                val sh = abs(slot.v1 - slot.v0) * th
+                val fx = x.toFloat(); val fy = y.toFloat(); val fw = w.toFloat(); val fh = h.toFloat()
+                val flipX = slot.u1 < slot.u0
+                val flipY = slot.v1 < slot.v0
+                if (flipX || flipY) {
+                    Skija.push()
+                    Skija.translate(if (flipX) fx + fx + fw else 0f, if (flipY) fy + fy + fh else 0f)
+                    Skija.scale(if (flipX) -1f else 1f, if (flipY) -1f else 1f)
+                }
+                Skija.image(img, sx, sy, sw, sh, x, y, w, h, radius, tint)
+                if (flipX || flipY) Skija.pop()
+            }
+        }
+
+        val itemState = GuiItemRenderState(Matrix3x2f(), state, 0, 0, ScreenRectangle(0, 0, 16, 16))
+        ourStates.add(itemState)
+        rs.addItem(itemState)
+    }
+}
