@@ -1,5 +1,7 @@
 # BlackSkija
 
+# NOT FINISHED RIGHT NOW, YOU PROBABLY SHOULD WAIT BEFORE I RELEASE NEW, MUCH BETTER VERSION
+
 GPU-accelerated UI rendering for Minecraft (Fabric), powered by [Skija](https://github.com/HumbleUI/Skija)
 (the JVM bindings to Google's [Skia](https://skia.org/)). BlackSkija draws your UI onto a
 Skija `Canvas` and composites the result over Minecraft's frame — on **Vulkan** or OpenGL —
