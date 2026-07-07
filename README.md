@@ -1,5 +1,7 @@
 # BlackSkija
 
+[![JitPack](https://jitpack.io/v/DreamcastERA1/BlackSkija.svg)](https://jitpack.io/#DreamcastERA1/BlackSkija)
+
 ### I totally didn't make readme with AI. Totally.
 
 GPU-accelerated UI rendering for Minecraft (Fabric), powered by [Skija](https://github.com/HumbleUI/Skija)
