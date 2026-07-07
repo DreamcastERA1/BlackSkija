@@ -6,9 +6,11 @@ import net.minecraft.world.item.ItemStack
 import net.minecraft.world.item.Items
 import org.blackaddons.blackskija.api.Gradient
 import org.blackaddons.blackskija.api.Skija
-import org.blackaddons.blackskija.api.SkijaImages
-import org.blackaddons.blackskija.api.SkijaItems
-import org.blackaddons.blackskija.api.SkijaText
+import org.blackaddons.blackskija.api.draw.SkijaImages
+import org.blackaddons.blackskija.api.draw.SkijaItems
+import org.blackaddons.blackskija.api.draw.SkijaText
+import org.blackaddons.blackskija.backend.common.SkijaBackend
+import org.joml.Matrix3x2f
 import java.awt.Color
 import kotlin.math.PI
 import kotlin.math.cos
@@ -25,6 +27,7 @@ object SkijaDemo {
 
     private val BLOCK_ATLAS = Identifier.withDefaultNamespace("textures/atlas/blocks.png")
     private val STONE_SPRITE = Identifier.withDefaultNamespace("block/stone")
+    private const val ICON = "/assets/blackskija/icon.png"
 
     private val DEMO_ITEM by lazy { ItemStack(Items.DIAMOND_SWORD) }
 
@@ -35,7 +38,7 @@ object SkijaDemo {
         val t = (System.nanoTime() / 1_000_000L) / 1000.0
 
         val pw = (sw * 0.7f).coerceIn(460f, 820f)
-        val ph = (sh * 0.7f).coerceIn(320f, 560f)
+        val ph = (sh * 0.72f).coerceIn(400f, 620f)
         val px = (sw - pw) / 2f
         val py = (sh - ph) / 2f
 
@@ -47,7 +50,8 @@ object SkijaDemo {
         val footerH = 26f
         Skija.drawHalfRoundedRect(px, py, pw, titleH, Color(255, 255, 255, 14), 14, roundTop = true)
         SkijaText.drawGradient("BlackSkija", px + 16, py + 11, ACCENT, Color(150, 205, 255), 15f)
-        SkijaText.draw("Skija · Vulkan", px + pw - 66, py + 14, MUTED, 9f, align = Skija.Align.RIGHT)
+        // Live backend marker (Vulkan / OpenGL).
+        SkijaText.draw("Skija · ${SkijaBackend.activeName}", px + pw - 66, py + 14, MUTED, 9f, align = Skija.Align.RIGHT)
         Skija.circle(px + pw - 22, py + 18, 5, Color(235, 90, 110))
         Skija.circle(px + pw - 38, py + 18, 5, Color(240, 190, 90))
         Skija.circle(px + pw - 54, py + 18, 5, Color(120, 210, 150))
@@ -64,7 +68,7 @@ object SkijaDemo {
         val bw = pw - pad * 2
         val bh = ph - titleH - footerH - pad * 2
         val cols = 4
-        val rows = 2
+        val rows = 3
         val gap = 14f
         val cw = (bw - gap * (cols - 1)) / cols
         val ch = (bh - gap * (rows - 1)) / rows
@@ -91,15 +95,21 @@ object SkijaDemo {
         cell(2, 0, "gradientRect") { x, y, w, h ->
             val gw = (w - 42) / 2
             Skija.gradientRect(x + 14, y + 16, gw, h - 32, Color(255, 120, 90), Color(150, 40, 120), Gradient.TOP_BOTTOM, 8)
-            Skija.gradientRect(x + 14 + gw + 14, y + 16, gw, h - 32, Color(90, 200, 255), Color(40, 70, 180), Gradient.LEFT_RIGHT, 8)
+            Skija.gradientRect(
+                x + 14 + gw + 14, y + 16, gw, h - 32,
+                listOf(Color(90, 200, 255), Color(150, 90, 220), Color(255, 120, 90)),
+                Gradient.LEFT_RIGHT, 8,
+            )
         }
 
         cell(3, 0, "alpha") { x, y, w, h ->
+            // Bright backdrop so falling alpha reads as transparency, not darkening.
+            Skija.gradientRect(x + 10, y + 12, w - 20, h - 24, Color(250, 238, 205), Color(250, 170, 110), Gradient.LEFT_RIGHT, 8)
             val cy = y + h / 2
             for (i in 0 until 5) {
                 Skija.push()
-                Skija.globalAlpha(1f - i * 0.17f)
-                Skija.circle(x + 22 + i * ((w - 44) / 4f), cy, 12, Color(120, 210, 170))
+                Skija.globalAlpha(1f - i * 0.18f)
+                Skija.circle(x + 22 + i * ((w - 44) / 4f), cy, 12, Color(50, 80, 200))
                 Skija.pop()
             }
         }
@@ -141,6 +151,43 @@ object SkijaDemo {
         cell(3, 1, "mc item") { x, y, w, h ->
             val side = minOf(w, h) - 20
             SkijaItems.draw(DEMO_ITEM, x + (w - side) / 2, y + (h - side) / 2 - 4, side, side)
+        }
+
+        cell(0, 2, "wrappedText") { x, y, w, h ->
+            SkijaText.drawWrapped(
+                "Word-wrapped paragraph, laid out and measured by Skija to the cell width.",
+                x + 12, y + 12, w - 24, INK, 8f, lineHeight = 1.15f,
+            )
+        }
+
+        cell(1, 2, "image · tint") { x, y, w, h ->
+            val icon = SkijaImages.resource(ICON)
+            val side = minOf(w, h) - 26
+            val k = ((sin(t * 2) + 1) / 2).toFloat()
+            val tint = Color((255 * (0.55f + 0.45f * k)).toInt(), (255 * (0.7f + 0.3f * k)).toInt(), 255)
+            Skija.image(icon, x + (w - side) / 2, y + (h - side) / 2 - 4, side, side, radius = 10, tint = tint)
+        }
+
+        cell(2, 2, "drawMc") { x, y, w, h ->
+            val side = minOf(w, h) - 20
+            SkijaImages.drawMc(BLOCK_ATLAS, x + (w - side) / 2, y + (h - side) / 2 - 4, side, side, radius = 6)
+        }
+
+        cell(3, 2, "scale · xform") { x, y, w, h ->
+            val cx = x + w / 2
+            val cy = y + h / 2
+            val pulse = ((sin(t * 2) + 1) / 2).toFloat()
+            Skija.push()
+            Skija.translate(cx - w * 0.18f, cy)
+            Skija.scale(0.6f + 0.5f * pulse)
+            Skija.rect(-12, -12, 24, 24, ACCENT, 4)
+            Skija.pop()
+            Skija.push()
+            Skija.translate(cx + w * 0.18f, cy)
+            // Shear affine (m10 shears x by y).
+            Skija.transform(Matrix3x2f(1f, 0f, (sin(t) * 0.5).toFloat(), 1f, 0f, 0f))
+            Skija.hollowRect(-14, -14, 28, 28, 2.0, Color(120, 210, 150, 200), 5)
+            Skija.pop()
         }
     }
 }

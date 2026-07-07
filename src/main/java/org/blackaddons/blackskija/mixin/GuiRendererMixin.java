@@ -2,7 +2,7 @@ package org.blackaddons.blackskija.mixin;
 
 import net.minecraft.client.gui.render.GuiRenderer;
 import net.minecraft.client.renderer.state.gui.GuiRenderState;
-import org.blackaddons.blackskija.backend.SkijaCompositor;
+import org.blackaddons.blackskija.backend.common.SkijaCompositor;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;

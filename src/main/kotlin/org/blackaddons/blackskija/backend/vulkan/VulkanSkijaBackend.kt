@@ -1,4 +1,4 @@
-package org.blackaddons.blackskija.backend
+package org.blackaddons.blackskija.backend.vulkan
 
 import com.mojang.blaze3d.systems.GpuDevice
 import com.mojang.blaze3d.systems.RenderSystem
@@ -6,22 +6,13 @@ import com.mojang.blaze3d.textures.GpuTextureView
 import com.mojang.blaze3d.vulkan.VulkanConst
 import com.mojang.blaze3d.vulkan.VulkanDevice
 import com.mojang.blaze3d.vulkan.VulkanGpuTexture
-import io.github.humbleui.skija.BackendRenderTarget
-import io.github.humbleui.skija.BackendTexture
-import io.github.humbleui.skija.ColorAlphaType
-import io.github.humbleui.skija.ColorSpace
-import io.github.humbleui.skija.ColorType
-import io.github.humbleui.skija.DirectContext
-import io.github.humbleui.skija.Image
-import io.github.humbleui.skija.Surface
-import io.github.humbleui.skija.SurfaceOrigin
-import io.github.humbleui.skija.VkImageInfo
-import io.github.humbleui.skija.VulkanAlloc
+import io.github.humbleui.skija.*
+import org.blackaddons.blackskija.backend.common.SkijaBackend
 import org.lwjgl.vulkan.VK
 import org.lwjgl.vulkan.VK10
 import org.lwjgl.vulkan.VK12
 
-object VulkanSkijaBackend : SkijaBackend {
+internal object VulkanSkijaBackend : SkijaBackend {
 
     private const val VK_IMAGE_TILING_OPTIMAL = 0
     private const val VK_IMAGE_LAYOUT_GENERAL = 1
@@ -30,7 +21,12 @@ object VulkanSkijaBackend : SkijaBackend {
     private const val VK_QUEUE_FAMILY_IGNORED = -1
     private const val VK_SHARING_MODE_EXCLUSIVE = 0
 
+    override val displayName = "Vulkan"
+
     private var cached: DirectContext? = null
+
+    // Orders our write before MC's blit read (0-latency); created with the shared device/queue.
+    private var barrier: VulkanFrameBarrier? = null
 
     override val context: DirectContext
         get() = cached ?: createContext().also { cached = it }
@@ -41,6 +37,8 @@ object VulkanSkijaBackend : SkijaBackend {
         val vkDevice = device.vkDevice()
         val vkPhysicalDevice = vkDevice.physicalDevice
         val queue = device.graphicsQueue()
+
+        barrier = VulkanFrameBarrier(vkDevice, queue.vkQueue(), queue.queueFamilyIndex())
 
         val getInstanceProcAddr = VK.getFunctionProvider().getFunctionAddress("vkGetInstanceProcAddr")
         val getDeviceProcAddr = VK10.vkGetInstanceProcAddr(vkInstance, "vkGetDeviceProcAddr")
@@ -105,7 +103,14 @@ object VulkanSkijaBackend : SkijaBackend {
         return image
     }
 
+    override fun orderWriteBeforeRead(view: GpuTextureView) {
+        val image = (view.texture() as? VulkanGpuTexture)?.vkImage() ?: return
+        barrier?.order(image)
+    }
+
     override fun dispose() {
+        barrier?.dispose()
+        barrier = null
         cached?.close()
         cached = null
     }

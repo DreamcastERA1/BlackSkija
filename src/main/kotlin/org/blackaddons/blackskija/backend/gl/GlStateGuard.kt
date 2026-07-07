@@ -1,75 +1,14 @@
-package org.blackaddons.blackskija.backend
+package org.blackaddons.blackskija.backend.gl
 
-import com.mojang.blaze3d.opengl.GlTextureView
-import com.mojang.blaze3d.textures.GpuTextureView
-import io.github.humbleui.skija.BackendRenderTarget
-import io.github.humbleui.skija.BackendTexture
-import io.github.humbleui.skija.ColorAlphaType
-import io.github.humbleui.skija.ColorType
-import io.github.humbleui.skija.DirectContext
-import io.github.humbleui.skija.GLTextureInfo
-import io.github.humbleui.skija.Image
-import io.github.humbleui.skija.Surface
-import io.github.humbleui.skija.SurfaceOrigin
-import org.lwjgl.opengl.GL11C
-import org.lwjgl.opengl.GL13C
-import org.lwjgl.opengl.GL14C
-import org.lwjgl.opengl.GL15C
-import org.lwjgl.opengl.GL20C
-import org.lwjgl.opengl.GL30C
-import org.lwjgl.opengl.GL33C
+import org.lwjgl.opengl.*
 import org.lwjgl.system.MemoryStack
 
-object GlSkijaBackend : SkijaBackend {
+// Snapshots/restores the raw GL state Skija clobbers, so MC's GlStateManager cache stays truthful.
+// Skija's raw gl* calls bypass that cache, so without this MC renders on Skija's leftovers (the GL
+// dark-item bug). save() runs before any Skija work, restore() after. Vulkan needs none of this.
+internal object GlStateGuard {
 
-    private const val GL_RGBA8 = 0x8058
-
-    private var cached: DirectContext? = null
-    override val context: DirectContext
-        get() = cached ?: DirectContext.makeGL().also { cached = it }
-
-    private val fbos = ArrayDeque<Int>()
-
-    override val flipBlitU = false
-    override val flipBlitV = true
-
-    override fun onBeginFrame() {
-        context.resetGLAll()
-    }
-
-    override fun wrapTarget(view: GpuTextureView): Surface {
-        val glId = (view as GlTextureView).glId()
-        val w = view.getWidth(0)
-        val h = view.getHeight(0)
-
-        val prevFbo = GL30C.glGetInteger(GL30C.GL_FRAMEBUFFER_BINDING)
-        val fbo = GL30C.glGenFramebuffers()
-        GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, fbo)
-        GL30C.glFramebufferTexture2D(GL30C.GL_FRAMEBUFFER, GL30C.GL_COLOR_ATTACHMENT0, GL11C.GL_TEXTURE_2D, glId, 0)
-        GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, prevFbo)
-        fbos.addLast(fbo)
-        while (fbos.size > 2) GL30C.glDeleteFramebuffers(fbos.removeFirst())
-
-        val rt = BackendRenderTarget.makeGL(w, h, 0, 0, fbo, GL_RGBA8)
-
-        return Surface.wrapBackendRenderTarget(
-            context, rt, SurfaceOrigin.BOTTOM_LEFT, ColorType.RGBA_8888, null,
-        )
-    }
-
-    override fun wrapTexture(view: GpuTextureView, premultiplied: Boolean): Image? {
-        val glId = (view as? GlTextureView)?.glId() ?: return null
-        val info = GLTextureInfo(GL11C.GL_TEXTURE_2D, glId, GL_RGBA8)
-        val backend = BackendTexture.makeGL(view.getWidth(0), view.getHeight(0), false, info)
-        val alpha = if (premultiplied) ColorAlphaType.PREMUL else ColorAlphaType.UNPREMUL
-        val image = Image.borrowTextureFrom(
-            context, backend, SurfaceOrigin.TOP_LEFT, ColorType.RGBA_8888, alpha, null, null,
-        )
-        backend.close()
-        return image
-    }
-
-
+    // Enough texture units for MC 26.2's GUI pipeline; bump if a future MC binds higher units.
     private const val TEX_UNITS = 12
 
     private var sDrawFbo = 0
@@ -77,6 +16,7 @@ object GlSkijaBackend : SkijaBackend {
     private var sProgram = 0
     private var sVao = 0
     private var sArrayBuffer = 0
+    private var sElementBuffer = 0
     private var sActiveTexture = GL13C.GL_TEXTURE0
     private val sTexBinding = IntArray(TEX_UNITS)
     private val sSamplerBinding = IntArray(TEX_UNITS)
@@ -96,12 +36,14 @@ object GlSkijaBackend : SkijaBackend {
     private val sColorMask = BooleanArray(4)
     private var sFramebufferSrgb = false
 
-    override fun saveState() {
+    fun save() {
         sDrawFbo = GL11C.glGetInteger(GL30C.GL_DRAW_FRAMEBUFFER_BINDING)
         sReadFbo = GL11C.glGetInteger(GL30C.GL_READ_FRAMEBUFFER_BINDING)
         sProgram = GL11C.glGetInteger(GL20C.GL_CURRENT_PROGRAM)
         sVao = GL11C.glGetInteger(GL30C.GL_VERTEX_ARRAY_BINDING)
         sArrayBuffer = GL11C.glGetInteger(GL15C.GL_ARRAY_BUFFER_BINDING)
+        // EBO binding is VAO-scoped (read while MC's VAO is bound); restored after we rebind it.
+        sElementBuffer = GL11C.glGetInteger(GL15C.GL_ELEMENT_ARRAY_BUFFER_BINDING)
         sActiveTexture = GL11C.glGetInteger(GL13C.GL_ACTIVE_TEXTURE)
         for (i in 0 until TEX_UNITS) {
             GL13C.glActiveTexture(GL13C.GL_TEXTURE0 + i)
@@ -133,11 +75,13 @@ object GlSkijaBackend : SkijaBackend {
         }
     }
 
-    override fun restoreState() {
+    fun restore() {
         GL30C.glBindFramebuffer(GL30C.GL_DRAW_FRAMEBUFFER, sDrawFbo)
         GL30C.glBindFramebuffer(GL30C.GL_READ_FRAMEBUFFER, sReadFbo)
         GL20C.glUseProgram(sProgram)
         GL30C.glBindVertexArray(sVao)
+        // After the VAO is bound, restore its EBO binding (binding EBO mutates the bound VAO).
+        GL15C.glBindBuffer(GL15C.GL_ELEMENT_ARRAY_BUFFER, sElementBuffer)
         GL15C.glBindBuffer(GL15C.GL_ARRAY_BUFFER, sArrayBuffer)
         for (i in 0 until TEX_UNITS) {
             GL13C.glActiveTexture(GL13C.GL_TEXTURE0 + i)
@@ -162,11 +106,5 @@ object GlSkijaBackend : SkijaBackend {
 
     private fun setEnabled(cap: Int, on: Boolean) {
         if (on) GL11C.glEnable(cap) else GL11C.glDisable(cap)
-    }
-
-    override fun dispose() {
-        while (fbos.isNotEmpty()) GL30C.glDeleteFramebuffers(fbos.removeFirst())
-        cached?.close()
-        cached = null
     }
 }

@@ -14,6 +14,22 @@ group = providers.gradleProperty("maven_group").get()
 
 loom {
     accessWidenerPath = file("src/main/resources/blackskija.accesswidener")
+
+    // Portable client run configs that force the GPU backend via a launch arg (overrides options.txt),
+    // so GL vs Vulkan is one click with no file editing. Loom generates the machine-specific IDE
+    // configs from these on sync — the generated XMLs stay local (see .gitignore), this is the source.
+    runs {
+        create("clientVulkan") {
+            client()
+            configName = "Minecraft Client (Vulkan)"
+            programArgs("--graphicsBackend", "vulkan")
+        }
+        create("clientOpenGl") {
+            client()
+            configName = "Minecraft Client (OpenGL)"
+            programArgs("--graphicsBackend", "opengl")
+        }
+    }
 }
 
 repositories {
@@ -35,6 +51,13 @@ dependencies {
     val skijaVersion = providers.gradleProperty("skija_version").get()
     api("io.github.humbleui:skija-shared:$skijaVersion")
     include("io.github.humbleui:skija-shared:$skijaVersion")
+
+    // skija-shared needs io.github.humbleui:types at runtime (Rect/RRect/Point, which the native's
+    // _nAfterLoad resolves via FindClass). include() isn't transitive, so bundle it explicitly, or the
+    // installed mod crashes in DirectContext init. Dev works regardless because Gradle adds it transitively.
+    val typesVersion = providers.gradleProperty("types_version").get()
+    api("io.github.humbleui:types:$typesVersion")
+    include("io.github.humbleui:types:$typesVersion")
 
     // Resolved only to fingerprint (see generateSkijaHashes); not on any classpath.
     for (platform in listOf("windows-x64", "linux-x64", "macos-x64", "macos-arm64")) {

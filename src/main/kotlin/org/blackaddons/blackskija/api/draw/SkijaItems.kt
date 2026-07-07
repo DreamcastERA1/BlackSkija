@@ -1,6 +1,7 @@
-package org.blackaddons.blackskija.api
+package org.blackaddons.blackskija.api.draw
 
 import com.mojang.blaze3d.textures.GpuTextureView
+import io.github.humbleui.skija.Canvas
 import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.navigation.ScreenRectangle
 import net.minecraft.client.renderer.item.TrackingItemStackRenderState
@@ -8,11 +9,11 @@ import net.minecraft.client.renderer.state.gui.GuiItemRenderState
 import net.minecraft.client.renderer.state.gui.GuiRenderState
 import net.minecraft.world.item.ItemDisplayContext
 import net.minecraft.world.item.ItemStack
-import org.blackaddons.blackskija.backend.SkijaBackend
+import org.blackaddons.blackskija.api.Skija
+import org.blackaddons.blackskija.api.SkijaTextures
 import org.joml.Matrix3x2f
 import java.awt.Color
-import java.util.Collections
-import java.util.IdentityHashMap
+import java.util.*
 import kotlin.math.abs
 
 object SkijaItems {
@@ -25,17 +26,18 @@ object SkijaItems {
         Collections.newSetFromMap(IdentityHashMap())
     private val requestedThisFrame = HashSet<Any>()
 
-    fun beginFrame(state: GuiRenderState) {
+    internal fun beginFrame(state: GuiRenderState) {
         renderState = state
         ourStates.clear()
         requestedThisFrame.clear()
     }
 
-    fun endFrame() {
+    internal fun endFrame() {
         renderState = null
         captured.keys.retainAll(requestedThisFrame)
     }
 
+    // Called from GuiItemCaptureMixin (Java). Must stay public despite being internal use.
     fun capture(state: GuiItemRenderState, view: GpuTextureView, u0: Float, v0: Float, u1: Float, v1: Float): Boolean {
         if (state !in ourStates) return false
         val id = state.itemStackRenderState().modelIdentity
@@ -43,7 +45,19 @@ object SkijaItems {
         return true
     }
 
+    /**
+     * Queues an item draw. Callable from anywhere on the render thread (HUD hooks included); the
+     * body runs at composite time where MC's render state is live. Like all GUI items it's a
+     * one-frame pipeline: frame 1 registers the item so the capture mixin grabs its texture, frame 2
+     * draws it. Keeps its place in the draw order among other [Skija] calls in the same frame.
+     */
     fun draw(stack: ItemStack, x: Number, y: Number, w: Number, h: Number, radius: Number = 0, tint: Color? = null) {
+        Skija.enqueue { canvas -> drawQueued(canvas, stack, x, y, w, h, radius, tint) }
+    }
+
+    private fun drawQueued(
+        canvas: Canvas, stack: ItemStack, x: Number, y: Number, w: Number, h: Number, radius: Number, tint: Color?,
+    ) {
         val rs = renderState ?: return
         val mc = Minecraft.getInstance()
 
@@ -54,7 +68,8 @@ object SkijaItems {
 
         val slot = captured[id]
         if (slot != null && !slot.view.isClosed) {
-            SkijaBackend.active?.wrapTexture(slot.view, premultiplied = true)?.use { img ->
+            val img = SkijaTextures.wrap(slot.view, premultiplied = true)
+            if (img != null) {
                 val tw = img.width.toFloat()
                 val th = img.height.toFloat()
                 val sx = minOf(slot.u0, slot.u1) * tw
@@ -64,13 +79,16 @@ object SkijaItems {
                 val fx = x.toFloat(); val fy = y.toFloat(); val fw = w.toFloat(); val fh = h.toFloat()
                 val flipX = slot.u1 < slot.u0
                 val flipY = slot.v1 < slot.v0
-                if (flipX || flipY) {
-                    Skija.push()
-                    Skija.translate(if (flipX) fx + fx + fw else 0f, if (flipY) fy + fy + fh else 0f)
-                    Skija.scale(if (flipX) -1f else 1f, if (flipY) -1f else 1f)
+                val saveCount = canvas.save()
+                try {
+                    if (flipX || flipY) {
+                        canvas.translate(if (flipX) fx + fx + fw else 0f, if (flipY) fy + fy + fh else 0f)
+                        canvas.scale(if (flipX) -1f else 1f, if (flipY) -1f else 1f)
+                    }
+                    Skija.drawImageDirect(canvas, img, sx, sy, sw, sh, fx, fy, fw, fh, radius.toFloat(), tint)
+                } finally {
+                    canvas.restoreToCount(saveCount)
                 }
-                Skija.image(img, sx, sy, sw, sh, x, y, w, h, radius, tint)
-                if (flipX || flipY) Skija.pop()
             }
         }
 
