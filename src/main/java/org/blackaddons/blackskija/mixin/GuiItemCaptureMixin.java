@@ -3,7 +3,7 @@ package org.blackaddons.blackskija.mixin;
 import net.minecraft.client.gui.render.GuiItemAtlas;
 import net.minecraft.client.gui.render.GuiRenderer;
 import net.minecraft.client.renderer.state.gui.GuiItemRenderState;
-import org.blackaddons.blackskija.api.SkijaItems;
+import org.blackaddons.blackskija.api.draw.SkijaItems;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;

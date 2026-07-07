@@ -13,10 +13,9 @@ object SkijaFonts {
 
     private const val DEFAULT_TTF = "/assets/blackskija/font/jetbrainsmono-regular.ttf"
 
-    /** Holds every typeface we register, addressable by family name. */
     private val provider = TypefaceFontProvider()
 
-    val collection: FontCollection by lazy {
+    internal val collection: FontCollection by lazy {
         register(DEFAULT, DEFAULT_TTF)
         FontCollection().apply {
             setDefaultFontManager(FontMgr.getDefault())

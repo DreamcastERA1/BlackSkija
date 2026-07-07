@@ -7,7 +7,8 @@
 # Gradle build folder
 build
 
-# IntelliJ
+# IntelliJ (run configs live in build.gradle.kts `loom.runs`, generated locally — not committed,
+# because the generated XMLs bake in machine-specific gradle-cache paths)
 out/
 .idea
 *.iml
@@ -15,6 +16,12 @@ out/
 .kotlin
 # mpeltonen/sbt-idea plugin
 .idea_modules/
+
+# Eclipse / Buildship / VSCode-Java project files + output
+bin/
+.classpath
+.project
+.settings/
 
 # virtual machine crash logs, see http://www.java.com/en/download/help/error_hotspot.xml
 hs_err_pid*
