@@ -41,7 +41,13 @@ class BlackskijaClient : ClientModInitializer {
             ResourceManagerReloadListener { WrappedTextureCache.clear() },
         )
 
-        if (FabricLoader.getInstance().isDevelopmentEnvironment) {
+        // The dev showcase (demo screen + always-on demo HUD + F6/F8/F9 keybinds) must NOT
+        // activate when BlackSkija is used as a *dependency*: a consumer mod's own dev run
+        // also reports isDevelopmentEnvironment, so that check alone leaks the demo into it.
+        // Gate on a marker system property that ONLY BlackSkija's own run configs set (see
+        // build.gradle.kts `runs`), so consumers never see the demo in dev or release.
+        if (FabricLoader.getInstance().isDevelopmentEnvironment
+            && System.getProperty("blackskija.demo").toBoolean()) {
             registerDevShowcase()
         }
     }
