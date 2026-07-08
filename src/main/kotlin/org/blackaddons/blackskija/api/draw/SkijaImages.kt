@@ -34,6 +34,16 @@ object SkijaImages {
         Image.makeDeferredFromEncodedBytes(bytes)
     }
 
+    /**
+     * Wraps raw encoded image bytes (PNG/JPG) as a cached deferred [Image], keyed by
+     * [key]. Lets callers feed images the classpath can't reach — an http-fetched skin,
+     * a file on disk — sharing the same LRU + cleanup as [resource]. The caller owns
+     * fetching the bytes; decode is deferred to first draw.
+     */
+    fun fromEncoded(key: String, bytes: ByteArray): Image = resourceCache.getOrPut(key) {
+        Image.makeDeferredFromEncodedBytes(bytes)
+    }
+
     /** Drops a cached [resource] image and frees it. */
     fun delete(path: String) {
         resourceCache.remove(path)?.close()
