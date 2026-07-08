@@ -23,11 +23,15 @@ loom {
             client()
             configName = "Minecraft Client (Vulkan)"
             programArgs("--graphicsBackend", "vulkan")
+            // Marker so the dev showcase runs ONLY in BlackSkija's own dev, never in a
+            // consumer mod's dev run (which also has isDevelopmentEnvironment). See BlackskijaClient.
+            property("blackskija.demo", "true")
         }
         create("clientOpenGl") {
             client()
             configName = "Minecraft Client (OpenGL)"
             programArgs("--graphicsBackend", "opengl")
+            property("blackskija.demo", "true")
         }
     }
 }
