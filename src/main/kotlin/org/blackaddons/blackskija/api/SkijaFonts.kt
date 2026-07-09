@@ -15,6 +15,14 @@ object SkijaFonts {
 
     private val provider = TypefaceFontProvider()
 
+    private val typefaces = HashMap<String, Typeface>()
+
+    /** The typeface registered under [family], or null if nothing was registered for it. */
+    internal fun typeface(family: String): Typeface? {
+        collection // force the default face to register
+        return typefaces[family]
+    }
+
     internal val collection: FontCollection by lazy {
         register(DEFAULT, DEFAULT_TTF)
         FontCollection().apply {
@@ -30,11 +38,12 @@ object SkijaFonts {
             ?: error("BlackSkija: bundled font not found on classpath: $resourcePath")
         val typeface: Typeface = FontMgr.getDefault().makeFromData(Data.makeFromBytes(bytes))
             ?: error("BlackSkija: failed to decode font (corrupt or unsupported): $resourcePath")
-        provider.registerTypeface(typeface, family)
+        register(family, typeface)
     }
 
     /** Registers an already-decoded [typeface] under [family]. */
     fun register(family: String, typeface: Typeface) {
         provider.registerTypeface(typeface, family)
+        typefaces[family] = typeface
     }
 }
