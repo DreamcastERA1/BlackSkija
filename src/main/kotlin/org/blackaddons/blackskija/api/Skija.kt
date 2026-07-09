@@ -298,6 +298,17 @@ object Skija {
         TextLayoutCache.measureWidth(text, size.toFloat(), family)
 
     /**
+     * Vertical extent of one line of [family] at [size], as `[ascent, descent]` in pixels —
+     * both positive, measured from the baseline.
+     *
+     * [size] is an **em** size, so it is not the height of the drawn glyphs: `ascent + descent`
+     * is, and it typically runs to ~1.3x [size]. Text drawn by [text] occupies `y` through
+     * `y + ascent + descent`, so centering a line in a box needs these numbers, not [size].
+     */
+    fun textMetrics(size: Number, family: String = SkijaFonts.DEFAULT): FloatArray =
+        TextLayoutCache.metrics(size.toFloat(), family)
+
+    /**
      * Draws [text] filled with a linear gradient across [colors] (2+); see [gradientRect] for
      * [stops]/[gradient]. The gradient spans the measured text width (horizontal) or the font
      * [size] (vertical).

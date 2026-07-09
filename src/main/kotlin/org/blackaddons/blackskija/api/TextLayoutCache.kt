@@ -2,6 +2,7 @@ package org.blackaddons.blackskija.api
 
 import io.github.humbleui.skija.Canvas
 import io.github.humbleui.skija.Paint
+import io.github.humbleui.skija.Font as SkFont
 import io.github.humbleui.skija.paragraph.Paragraph
 import io.github.humbleui.skija.paragraph.ParagraphBuilder
 import io.github.humbleui.skija.paragraph.ParagraphStyle
@@ -34,6 +35,22 @@ internal object TextLayoutCache {
     }
 
     private val paint = Paint()
+
+    // Metrics depend only on the face and the size, so they cache far more coarsely than layouts.
+    private val metricsCache = HashMap<Pair<String, Float>, FloatArray>()
+
+    /**
+     * `[ascent, descent]` in pixels, both positive. Read straight off the typeface rather than a
+     * laid-out paragraph: it needs no text, and Skia's line box rounds to whole pixels.
+     *
+     * Falls back to `[size, 0]` for a family that was never registered — wrong, but bounded, and
+     * only reachable if a caller asks about a font it never drew with.
+     */
+    fun metrics(size: Float, family: String): FloatArray = metricsCache.getOrPut(family to size) {
+        val typeface = SkijaFonts.typeface(family) ?: return@getOrPut floatArrayOf(size, 0f)
+        // Skia signs ascent negative (above the baseline) and descent positive.
+        SkFont(typeface, size).use { floatArrayOf(-it.metrics.ascent, it.metrics.descent) }
+    }
 
     fun measureWidth(text: String, size: Float, family: String): Float =
         entry(text, size, family, Float.POSITIVE_INFINITY, 1f).paragraph.maxIntrinsicWidth
