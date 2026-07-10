@@ -26,6 +26,8 @@ so you get anti-aliased shapes, gradients, blur, drop shadows, and rich text wit
   path on Vulkan; gracefully disables on a GPU API it can't adapt. Most Skija/NanoVG UI mods
   are GL-only.
 - **Immediate-mode** — call from any render-thread hook, no begin/end; an idle frame costs nothing.
+- **Correct depth** — draws issued from a HUD hook composite *below* screens, the pause menu and the
+  resource-pack overlay; draws issued afterwards go on top. No HUD bleeding over open menus.
 
 ## Requirements
 
