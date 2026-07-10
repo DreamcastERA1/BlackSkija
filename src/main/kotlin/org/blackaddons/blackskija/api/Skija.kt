@@ -52,11 +52,20 @@ object Skija {
 
     internal fun hasContent(): Boolean = batch.isNotEmpty()
 
+    /** How many ops are queued so far this frame — the compositor's split point between layers. */
+    internal fun size(): Int = batch.size
+
     internal fun discard() {
         batch.clear()
     }
 
-    internal fun flush(canvas: Canvas, pose: Matrix3x2fc) {
+    /**
+     * Replays `batch[from, to)` onto [canvas]. The compositor splits the frame at the HUD boundary
+     * and replays each range onto its own surface, so pass [to] = [Int.MAX_VALUE] for the last range
+     * to keep picking up ops an op queues mid-replay. Does not clear the batch — [discard] does,
+     * once every range has been replayed.
+     */
+    internal fun flush(canvas: Canvas, pose: Matrix3x2fc, from: Int = 0, to: Int = Int.MAX_VALUE) {
         alpha = 1f
         alphaStack.clear()
         saveDepth = 0
@@ -64,8 +73,8 @@ object Skija {
         canvas.concat(pose.toMatrix33())
         try {
             // Indexed loop: tolerant of op queuing further work mid-replay.
-            var i = 0
-            while (i < batch.size) {
+            var i = from
+            while (i < minOf(to, batch.size)) {
                 batch[i](canvas)
                 i++
             }
@@ -77,9 +86,8 @@ object Skija {
                 )
             }
             // Unwind to base regardless of imbalance or a mid-batch throw, so leftover clips or
-            // transforms can't bleed into the next frame (the canvas is reused).
+            // transforms can't bleed into the next range or frame (the canvas is reused).
             canvas.restoreToCount(base)
-            batch.clear()
             alpha = 1f
             alphaStack.clear()
             saveDepth = 0
