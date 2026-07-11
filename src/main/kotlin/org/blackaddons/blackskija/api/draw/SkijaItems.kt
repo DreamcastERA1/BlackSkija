@@ -15,6 +15,8 @@ import org.joml.Matrix3x2f
 import java.awt.Color
 import java.util.*
 import kotlin.math.abs
+import kotlin.math.ceil
+import kotlin.math.max
 
 object SkijaItems {
 
@@ -26,11 +28,20 @@ object SkijaItems {
         Collections.newSetFromMap(IdentityHashMap())
     private val requestedThisFrame = HashSet<Any>()
 
+    @Volatile
+    var supersample: Float = 1f
+
+    // Largest item draw this frame (logical px, max of w/h); drives the adaptive atlas slot size.
+    private var maxItemPx = 0f
+
     internal fun beginFrame(state: GuiRenderState) {
         renderState = state
         ourStates.clear()
         requestedThisFrame.clear()
+        maxItemPx = 0f
     }
+
+    fun atlasSlotScale(): Int = max(1, ceil(maxItemPx * supersample / 16f).toInt())
 
     internal fun endFrame() {
         renderState = null
@@ -59,6 +70,7 @@ object SkijaItems {
         canvas: Canvas, stack: ItemStack, x: Number, y: Number, w: Number, h: Number, radius: Number, tint: Color?,
     ) {
         val rs = renderState ?: return
+        maxItemPx = max(maxItemPx, max(w.toFloat(), h.toFloat()))
         val mc = Minecraft.getInstance()
 
         val state = TrackingItemStackRenderState()
