@@ -12,6 +12,7 @@ import net.minecraft.client.renderer.RenderPipelines
 import net.minecraft.client.renderer.state.gui.BlitRenderState
 import net.minecraft.client.renderer.state.gui.GuiRenderState
 import org.blackaddons.blackskija.api.Skija
+import org.blackaddons.blackskija.api.draw.SkijaEntity
 import org.blackaddons.blackskija.api.draw.SkijaItems
 import org.blackaddons.blackskija.api.screen.SkijaOverlay
 import org.blackaddons.blackskija.backend.natives.SkijaNatives
@@ -143,6 +144,7 @@ object SkijaCompositor {
             // Item draws register into MC's render state, so this brackets the draw phase: the
             // optional content callback plus any HUD calls already queued for this frame.
             SkijaItems.beginFrame(guiRenderState)
+            SkijaEntity.beginFrame(guiRenderState)
             if (SkijaOverlay.enabled) {
                 try {
                     SkijaOverlay.content()
@@ -189,6 +191,7 @@ object SkijaCompositor {
             hudSplit = -1
             backend.restoreState()
             SkijaItems.endFrame()
+            SkijaEntity.endFrame()
         }
     }
 
