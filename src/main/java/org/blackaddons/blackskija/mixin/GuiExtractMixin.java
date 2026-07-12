@@ -12,7 +12,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
  * Marks where the HUD's Skija draws belong in the GUI's depth order.
- *
+ * <p>
  * {@code Gui.extractRenderState} extracts the HUD, then the overlay, then the screen — the last two
  * each opening a new stratum. Injecting after the HUD call returns (rather than at the tail of
  * {@code Hud.extractRenderState} itself) puts this after every mixin a consumer may have on the HUD,

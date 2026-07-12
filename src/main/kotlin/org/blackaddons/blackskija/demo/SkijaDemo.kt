@@ -10,7 +10,6 @@ import org.blackaddons.blackskija.api.draw.SkijaImages
 import org.blackaddons.blackskija.api.draw.SkijaItems
 import org.blackaddons.blackskija.api.draw.SkijaText
 import org.blackaddons.blackskija.backend.common.SkijaBackend
-import org.joml.Matrix3x2f
 import java.awt.Color
 import kotlin.math.PI
 import kotlin.math.cos
@@ -173,21 +172,10 @@ object SkijaDemo {
             SkijaImages.drawMc(BLOCK_ATLAS, x + (w - side) / 2, y + (h - side) / 2 - 4, side, side, radius = 6)
         }
 
-        cell(3, 2, "scale · xform") { x, y, w, h ->
-            val cx = x + w / 2
-            val cy = y + h / 2
-            val pulse = ((sin(t * 2) + 1) / 2).toFloat()
-            Skija.push()
-            Skija.translate(cx - w * 0.18f, cy)
-            Skija.scale(0.6f + 0.5f * pulse)
-            Skija.rect(-12, -12, 24, 24, ACCENT, 4)
-            Skija.pop()
-            Skija.push()
-            Skija.translate(cx + w * 0.18f, cy)
-            // Shear affine (m10 shears x by y).
-            Skija.transform(Matrix3x2f(1f, 0f, (sin(t) * 0.5).toFloat(), 1f, 0f, 0f))
-            Skija.hollowRect(-14, -14, 28, 28, 2.0, Color(120, 210, 150, 200), 5)
-            Skija.pop()
+        cell(3, 2, "mc entity") { x, y, w, h ->
+            // A live mob drawn through SkijaEntity — proof an entity composites over the Skija panel,
+            // not under it. Inset above the cell's label.
+            DemoEntity.draw(x, y + 4, w, h - 20, t)
         }
     }
 }
