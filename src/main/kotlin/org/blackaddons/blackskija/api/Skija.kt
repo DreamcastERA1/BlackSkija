@@ -258,6 +258,26 @@ object Skija {
         drawImage(it, image, src, x.toFloat(), y.toFloat(), w.toFloat(), h.toFloat(), radius.toFloat(), tint)
     }
 
+    /**
+     * How to resample an image being drawn from [src] into [dst].
+     *
+     * Nearest ([SamplingMode.DEFAULT]) is right for Minecraft's art when it is drawn at or above its
+     * own resolution — it keeps a pixel a pixel. But it is wrong when the image has to *shrink*: it
+     * simply drops the pixels that don't land on an output one, so edges come out chewed. That case
+     * is not rare — an item comes off a supersampled atlas whose slot size is driven by the largest
+     * item on screen, so a small icon beside a large one is always a downscale.
+     *
+     * A cubic resampler handles it by averaging a neighborhood, and needs no mipmaps — which is the
+     * point: these images wrap GPU textures that have none, so a mipmapped filter would be ignored.
+     */
+    private fun sampling(src: Rect, dst: Rect): SamplingMode {
+        val shrinking = src.width > dst.width * DOWNSCALE_SLACK || src.height > dst.height * DOWNSCALE_SLACK
+        return if (shrinking) SamplingMode.MITCHELL else SamplingMode.DEFAULT
+    }
+
+    /** Ignore a hair of shrinkage (rounding, a half-pixel layout) — that isn't a real downscale. */
+    private const val DOWNSCALE_SLACK = 1.05f
+
     private fun drawImage(
         canvas: Canvas, image: Image, src: Rect?, x: Float, y: Float, w: Float, h: Float, radius: Float, tint: Color?,
     ) {
@@ -273,7 +293,7 @@ object Skija {
             canvas.save()
             canvas.clipRRect(RRect.makeXYWH(x, y, w, h, radius), antiAlias)
         }
-        canvas.drawImageRect(image, srcRect, dstRect, SamplingMode.DEFAULT, imgPaint, true)
+        canvas.drawImageRect(image, srcRect, dstRect, sampling(srcRect, dstRect), imgPaint, true)
         if (rounded) canvas.restore()
         imgPaint.colorFilter = null
         tintFilter?.close()
