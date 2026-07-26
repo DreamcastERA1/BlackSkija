@@ -11,6 +11,7 @@ import net.minecraft.client.renderer.RenderPipelines
 import net.minecraft.client.renderer.state.gui.BlitRenderState
 import net.minecraft.client.renderer.state.gui.GuiRenderState
 import org.blackaddons.blackskija.api.Skija
+import org.blackaddons.blackskija.api.TextLayoutCache
 import org.blackaddons.blackskija.api.draw.SkijaEntity
 import org.blackaddons.blackskija.api.draw.SkijaItems
 import org.blackaddons.blackskija.api.screen.SkijaOverlay
@@ -186,6 +187,9 @@ object SkijaCompositor {
         } finally {
             // One batch feeds both buffers, so it is cleared once, after the last range is replayed.
             Skija.discard()
+            // Both ranges have been flushed and submitted by now, so nothing pending can still point
+            // at a paragraph the replay evicted. This is the only safe moment to free them.
+            TextLayoutCache.releaseEvicted()
             hudSplit = -1
             backend.restoreState()
             SkijaItems.endFrame()

@@ -27,11 +27,30 @@ internal object TextLayoutCache {
         var solid = false
     }
 
+    // Evicted paragraphs, awaiting close(). They are NOT freed at eviction: painting a paragraph only
+    // records it into the canvas, and the GPU work happens later, at the frame's flushAndSubmit. A
+    // paragraph evicted after being painted but before that flush would have its native memory freed
+    // while the pending display list still points at it — a use-after-free whose damage accumulates,
+    // and whose visible form is glyphs rendered with the wrong or missing pieces. Text that changes
+    // every frame (a coordinate readout) mints a new key per frame, so it evicts constantly and is
+    // where this shows up first. Drained by releaseEvicted() once the frame has been flushed.
+    private val evicted = ArrayList<Paragraph>()
+
     private val cache = object : LinkedHashMap<Key, Entry>(64, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Key, Entry>): Boolean {
-            if (size > MAX) { eldest.value.paragraph.close(); return true }
+            if (size > MAX) { evicted += eldest.value.paragraph; return true }
             return false
         }
+    }
+
+    /**
+     * Frees the paragraphs evicted since the last call. Must be called only once the frame that could
+     * have painted them has been flushed and submitted — see [evicted].
+     */
+    fun releaseEvicted() {
+        if (evicted.isEmpty()) return
+        for (paragraph in evicted) paragraph.close()
+        evicted.clear()
     }
 
     private val paint = Paint()
