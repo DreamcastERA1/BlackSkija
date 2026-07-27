@@ -202,6 +202,12 @@ object SkijaCompositor {
         val surface = target.surface ?: return
         val view = target.view ?: return
         val canvas = surface.canvas
+        // Re-read GL state immediately before the flush, not just once at frame start. Between the two
+        // there is real Minecraft GL work — content() and the HUD borrow MC textures (item icons, entity
+        // captures) — so by now Skia's cached idea of the bindings is stale, and it will happily skip a
+        // bind it believes is already in effect. That shows up only on draws that *sample* a texture:
+        // glyphs and borrowed MC textures corrupt while flat rects and gradients stay clean.
+        backend.onBeginFrame()
         canvas.clear(0)
         Skija.flush(canvas, pose, from, to)
         // Submit async (no CPU stall), then order this write before MC's blit read of the same

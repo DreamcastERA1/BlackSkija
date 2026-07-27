@@ -25,6 +25,13 @@ internal object TextLayoutCache {
     private class Entry(val paragraph: Paragraph) {
         var lastArgb = 0
         var solid = false
+
+        /**
+         * Frame this paragraph was last recorded into a canvas by, or -1. Once the current frame has
+         * recorded it, restyling it would retroactively change that draw, so the draw asking for a
+         * different style gets a throwaway instead.
+         */
+        var paintedFrame = -1
     }
 
     // Evicted paragraphs, awaiting close(). They are NOT freed at eviction: painting a paragraph only
@@ -36,18 +43,24 @@ internal object TextLayoutCache {
     // where this shows up first. Drained by releaseEvicted() once the frame has been flushed.
     private val evicted = ArrayList<Paragraph>()
 
+    // Bumped once per composited frame, in releaseEvicted(). Entries remember the frame that recorded
+    // them so a second draw of the same key can tell whether recoloring would corrupt a pending record.
+    private var frame = 0
+
     private val cache = object : LinkedHashMap<Key, Entry>(64, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Key, Entry>): Boolean {
-            if (size > MAX) { evicted += eldest.value.paragraph; return true }
-            return false
+            if (size <= MAX) return false
+            evicted += eldest.value.paragraph
+            return true
         }
     }
 
     /**
-     * Frees the paragraphs evicted since the last call. Must be called only once the frame that could
-     * have painted them has been flushed and submitted — see [evicted].
+     * Frees the paragraphs evicted since the last call and opens the next frame. Must be called only
+     * once the frame that could have painted them has been flushed and submitted — see [evicted].
      */
     fun releaseEvicted() {
+        frame++
         if (evicted.isEmpty()) return
         for (paragraph in evicted) paragraph.close()
         evicted.clear()
@@ -90,7 +103,19 @@ internal object TextLayoutCache {
         val e = entry(text, size, family, width, lineHeight)
         // Skija 0.143.17: updateForegroundPaint only takes effect during layout(), so recoloring needs
         // updateForegroundPaint then layout() before paint. Skipped when the color is unchanged.
-        if (!e.solid || e.lastArgb != argb) {
+        val recolor = !e.solid || e.lastArgb != argb
+        if (recolor && e.paintedFrame == frame) {
+            // This frame already recorded the cached paragraph in another color, and a record only
+            // points at it — recoloring now would repaint the earlier draw too. Per-character chroma
+            // hits this constantly: every glyph is its own key, and a repeated character wants a
+            // different color each time.
+            paint.reset()
+            paint.isAntiAlias = antiAlias
+            paint.color = argb
+            oneOff(text, size, family, width, lineHeight, paint).paint(canvas, x, y)
+            return
+        }
+        if (recolor) {
             paint.reset()
             paint.isAntiAlias = antiAlias
             paint.color = argb
@@ -100,6 +125,7 @@ internal object TextLayoutCache {
             e.solid = true
         }
         e.paragraph.paint(canvas, x, y)
+        e.paintedFrame = frame
     }
 
     // Non-solid foreground (e.g., a gradient shader). Always recolors+relayouts, and marks the paragraph
@@ -109,10 +135,32 @@ internal object TextLayoutCache {
         width: Float, lineHeight: Float, fg: Paint, x: Float, y: Float,
     ) {
         val e = entry(text, size, family, width, lineHeight)
+        // A shader paint always re-styles, so once this frame has recorded the cached paragraph the
+        // only safe option is a throwaway — see the same guard in drawSolid.
+        if (e.paintedFrame == frame) {
+            oneOff(text, size, family, width, lineHeight, fg).paint(canvas, x, y)
+            return
+        }
         e.paragraph.updateForegroundPaint(0, text.length, fg)
         e.paragraph.layout(width)
         e.solid = false
         e.paragraph.paint(canvas, x, y)
+        e.paintedFrame = frame
+    }
+
+    /**
+     * A paragraph for a single draw, styled with [fg] and freed once the frame has been flushed. Used
+     * when the cached one is already spoken for by an earlier record in this frame; it rides the same
+     * [evicted] list, so it obeys the same "free only after the flush" rule.
+     */
+    private fun oneOff(
+        text: String, size: Float, family: String, width: Float, lineHeight: Float, fg: Paint,
+    ): Paragraph {
+        val p = build(text, size, family, lineHeight)
+        p.updateForegroundPaint(0, text.length, fg)
+        p.layout(width)
+        evicted += p
+        return p
     }
 
     // Cached laid-out entry for this content+style+width, built on a miss. Owned by the cache; never close it.
