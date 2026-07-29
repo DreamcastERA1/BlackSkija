@@ -35,6 +35,37 @@ internal object GlStateGuard {
     private val sScissorBox = IntArray(4)
     private val sColorMask = BooleanArray(4)
     private var sFramebufferSrgb = false
+    private var sUnpackBuffer = 0
+    private var sUnpackRowLength = 0
+    private var sUnpackImageHeight = 0
+    private var sUnpackSkipPixels = 0
+    private var sUnpackSkipRows = 0
+    private var sUnpackSkipImages = 0
+    private var sUnpackAlignment = 4
+
+    /**
+     * Puts the pixel-unpack state back to the GL defaults Skia assumes. Skia sets row length and
+     * alignment before its own uploads but never touches the skip values or the unpack buffer, so
+     * `resetGLAll` cannot cover them: it only invalidates Skia's cache of state Skia sets itself.
+     *
+     * Minecraft 26.1.2 uploads animated sprite frames (lava, water) through a `writeToTexture`
+     * overload that leaves `UNPACK_SKIP_PIXELS`/`SKIP_ROWS` at the frame's offset. Skia's next glyph
+     * or image upload then reads from the wrong place in the source pixmap, which bakes noise —
+     * or nothing at all — into the atlas permanently. 26.2 pins both to zero, which is why only one
+     * version showed it.
+     *
+     * Must run immediately before a flush, not only once per frame: Minecraft does real GL work in
+     * between (borrowed textures, item and entity capture).
+     */
+    fun neutralizeUnpack() {
+        GL15C.glBindBuffer(GL21C.GL_PIXEL_UNPACK_BUFFER, 0)
+        GL11C.glPixelStorei(GL11C.GL_UNPACK_ROW_LENGTH, 0)
+        GL11C.glPixelStorei(GL12C.GL_UNPACK_IMAGE_HEIGHT, 0)
+        GL11C.glPixelStorei(GL11C.GL_UNPACK_SKIP_PIXELS, 0)
+        GL11C.glPixelStorei(GL11C.GL_UNPACK_SKIP_ROWS, 0)
+        GL11C.glPixelStorei(GL12C.GL_UNPACK_SKIP_IMAGES, 0)
+        GL11C.glPixelStorei(GL11C.GL_UNPACK_ALIGNMENT, 4)
+    }
 
     fun save() {
         sDrawFbo = GL11C.glGetInteger(GL30C.GL_DRAW_FRAMEBUFFER_BINDING)
@@ -67,6 +98,14 @@ internal object GlStateGuard {
         sScissor = GL11C.glIsEnabled(GL11C.GL_SCISSOR_TEST)
         GL11C.glGetIntegerv(GL11C.GL_SCISSOR_BOX, sScissorBox)
         sFramebufferSrgb = GL11C.glIsEnabled(GL30C.GL_FRAMEBUFFER_SRGB)
+
+        sUnpackBuffer = GL11C.glGetInteger(GL21C.GL_PIXEL_UNPACK_BUFFER_BINDING)
+        sUnpackRowLength = GL11C.glGetInteger(GL11C.GL_UNPACK_ROW_LENGTH)
+        sUnpackImageHeight = GL11C.glGetInteger(GL12C.GL_UNPACK_IMAGE_HEIGHT)
+        sUnpackSkipPixels = GL11C.glGetInteger(GL11C.GL_UNPACK_SKIP_PIXELS)
+        sUnpackSkipRows = GL11C.glGetInteger(GL11C.GL_UNPACK_SKIP_ROWS)
+        sUnpackSkipImages = GL11C.glGetInteger(GL12C.GL_UNPACK_SKIP_IMAGES)
+        sUnpackAlignment = GL11C.glGetInteger(GL11C.GL_UNPACK_ALIGNMENT)
 
         MemoryStack.stackPush().use { stack ->
             val buf = stack.malloc(4)
@@ -102,6 +141,14 @@ internal object GlStateGuard {
         GL11C.glScissor(sScissorBox[0], sScissorBox[1], sScissorBox[2], sScissorBox[3])
         setEnabled(GL30C.GL_FRAMEBUFFER_SRGB, sFramebufferSrgb)
         GL11C.glColorMask(sColorMask[0], sColorMask[1], sColorMask[2], sColorMask[3])
+
+        GL15C.glBindBuffer(GL21C.GL_PIXEL_UNPACK_BUFFER, sUnpackBuffer)
+        GL11C.glPixelStorei(GL11C.GL_UNPACK_ROW_LENGTH, sUnpackRowLength)
+        GL11C.glPixelStorei(GL12C.GL_UNPACK_IMAGE_HEIGHT, sUnpackImageHeight)
+        GL11C.glPixelStorei(GL11C.GL_UNPACK_SKIP_PIXELS, sUnpackSkipPixels)
+        GL11C.glPixelStorei(GL11C.GL_UNPACK_SKIP_ROWS, sUnpackSkipRows)
+        GL11C.glPixelStorei(GL12C.GL_UNPACK_SKIP_IMAGES, sUnpackSkipImages)
+        GL11C.glPixelStorei(GL11C.GL_UNPACK_ALIGNMENT, sUnpackAlignment)
     }
 
     private fun setEnabled(cap: Int, on: Boolean) {

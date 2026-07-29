@@ -25,6 +25,9 @@ internal object GlSkijaBackend : SkijaBackend {
     override val flipBlitV = true
 
     override fun onBeginFrame() {
+        // resetGLAll makes Skia re-issue the state it sets itself; neutralizeUnpack covers the state
+        // it never sets and assumes is at the GL default. Minecraft leaves the latter dirty.
+        GlStateGuard.neutralizeUnpack()
         context.resetGLAll()
     }
 
