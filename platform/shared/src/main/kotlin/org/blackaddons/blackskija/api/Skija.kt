@@ -25,7 +25,8 @@ import kotlin.math.roundToInt
  *
  * Render-thread only, including the measuring helpers ([textWidth], [wrappedTextBounds]): they
  * build and reuse native paragraphs in a shared cache, so calling them off-thread can race a
- * frame flush and corrupt the native allocator.
+ * frame flush and corrupt the native allocator. Enforced — an off-thread call throws where it is
+ * made rather than corrupting a later frame; see [RenderThread].
  */
 object Skija {
     private val LOG = LoggerFactory.getLogger("blackskija")
@@ -100,11 +101,13 @@ object Skija {
     }
 
     private fun draw(op: (Canvas) -> Unit) {
+        RenderThread.require("a draw was queued")
         batch.add(op)
     }
 
     // For SkijaItems, which draws straight to the canvas at replay time rather than queuing more Skija calls.
     internal fun enqueue(op: (Canvas) -> Unit) {
+        RenderThread.require("a draw was queued")
         batch.add(op)
     }
 

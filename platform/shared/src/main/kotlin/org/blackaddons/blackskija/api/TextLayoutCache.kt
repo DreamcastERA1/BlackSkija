@@ -78,10 +78,13 @@ internal object TextLayoutCache {
      * Falls back to `[size, 0]` for a family that was never registered — wrong, but bounded, and
      * only reachable if a caller asks about a font it never drew with.
      */
-    fun metrics(size: Float, family: String): FloatArray = metricsCache.getOrPut(family to size) {
-        val typeface = SkijaFonts.typeface(family) ?: return@getOrPut floatArrayOf(size, 0f)
-        // Skia signs ascent negative (above the baseline) and descent positive.
-        SkFont(typeface, size).use { floatArrayOf(-it.metrics.ascent, it.metrics.descent) }
+    fun metrics(size: Float, family: String): FloatArray {
+        RenderThread.require("font metrics were read")
+        return metricsCache.getOrPut(family to size) {
+            val typeface = SkijaFonts.typeface(family) ?: return@getOrPut floatArrayOf(size, 0f)
+            // Skia signs ascent negative (above the baseline) and descent positive.
+            SkFont(typeface, size).use { floatArrayOf(-it.metrics.ascent, it.metrics.descent) }
+        }
     }
 
     fun measureWidth(text: String, size: Float, family: String): Float =
@@ -165,6 +168,9 @@ internal object TextLayoutCache {
 
     // Cached laid-out entry for this content+style+width, built on a miss. Owned by the cache; never close it.
     private fun entry(text: String, size: Float, family: String, width: Float, lineHeight: Float): Entry {
+        // Measuring is a layout, so it builds and caches a native paragraph exactly like drawing does —
+        // which is why the measuring helpers are as thread-bound as the draws.
+        RenderThread.require("text was measured or drawn")
         val key = Key(text, size, family, width, lineHeight)
         cache[key]?.let { return it }
         val p = build(text, size, family, lineHeight)
