@@ -4,14 +4,16 @@ import com.mojang.blaze3d.opengl.GlTextureView
 import com.mojang.blaze3d.textures.GpuTextureView
 import io.github.humbleui.skija.*
 import org.blackaddons.blackskija.backend.common.SkijaBackend
+import org.blackaddons.blackskija.backend.common.GpuProfileBackend
 import org.lwjgl.opengl.GL11C
 import org.lwjgl.opengl.GL30C
 
-internal object GlSkijaBackend : SkijaBackend {
+internal object GlSkijaBackend : SkijaBackend, GpuProfileBackend {
 
     private const val GL_RGBA8 = 0x8058
 
     override val displayName = "OpenGL"
+    override val gpuProfiler by lazy { GlGpuProfiler() }
 
     private var cached: DirectContext? = null
     override val context: DirectContext
@@ -69,6 +71,7 @@ internal object GlSkijaBackend : SkijaBackend {
     }
 
     override fun dispose() {
+        gpuProfiler.dispose()
         while (fbos.isNotEmpty()) GL30C.glDeleteFramebuffers(fbos.removeFirst())
         cached?.close()
         cached = null

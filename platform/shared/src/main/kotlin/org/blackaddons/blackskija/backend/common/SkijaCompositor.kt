@@ -11,6 +11,7 @@ import net.minecraft.client.renderer.RenderPipelines
 import net.minecraft.client.renderer.state.gui.BlitRenderState
 import net.minecraft.client.renderer.state.gui.GuiRenderState
 import org.blackaddons.blackskija.api.Skija
+import org.blackaddons.blackskija.api.SkijaProfiler
 import org.blackaddons.blackskija.api.TextLayoutCache
 import org.blackaddons.blackskija.api.draw.SkijaEntity
 import org.blackaddons.blackskija.api.draw.SkijaItems
@@ -119,6 +120,7 @@ object SkijaCompositor {
             Skija.discard()
             return
         }
+        SkijaProfiler.drainGpu(backend)
 
         // One-time: realise the Skija GPU context on the first ready frame, so the user's first
         // overlay open doesn't eat the makeVulkan/makeGL cost as a hitch.
@@ -209,10 +211,24 @@ object SkijaCompositor {
         // glyphs and borrowed MC textures corrupt while flat rects and gradients stay clean.
         backend.onBeginFrame()
         canvas.clear(0)
-        Skija.flush(canvas, pose, from, to)
-        // Submit async (no CPU stall), then order this write before MC's blit read of the same
-        // texture. Lets us blit the buffer drawn this frame with no submit semaphore (0.143.17 has none).
-        backend.context.flushAndSubmit(surface, false)
+        val session = Skija.beginFlush(canvas, pose)
+        try {
+            var cursor = from
+            for (range in SkijaProfiler.ranges(from, minOf(to, Skija.size()))) {
+                if (cursor < range.start) Skija.flush(session, cursor, range.start)
+                SkijaProfiler.measure(backend, range.name) {
+                    Skija.flush(session, range.start, range.end)
+                    backend.context.flushAndSubmit(surface, false)
+                }
+                cursor = range.end
+            }
+            if (cursor < to) Skija.flush(session, cursor, to)
+            // Submit async (no CPU stall), then order this write before MC's blit read of the same
+            // texture. Lets us blit the buffer drawn this frame with no submit semaphore (0.143.17 has none).
+            backend.context.flushAndSubmit(surface, false)
+        } finally {
+            Skija.endFlush(session)
+        }
         backend.orderWriteBeforeRead(view)
     }
 

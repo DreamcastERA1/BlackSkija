@@ -8,11 +8,14 @@ import com.mojang.blaze3d.vulkan.VulkanDevice
 import com.mojang.blaze3d.vulkan.VulkanGpuTexture
 import io.github.humbleui.skija.*
 import org.blackaddons.blackskija.backend.common.SkijaBackend
+import org.blackaddons.blackskija.backend.common.GpuProfileBackend
+import org.blackaddons.blackskija.backend.common.GpuProfiler
+import org.blackaddons.blackskija.backend.common.UnsupportedGpuProfiler
 import org.lwjgl.vulkan.VK
 import org.lwjgl.vulkan.VK10
 import org.lwjgl.vulkan.VK12
 
-internal object VulkanSkijaBackend : SkijaBackend {
+internal object VulkanSkijaBackend : SkijaBackend, GpuProfileBackend {
 
     private const val VK_IMAGE_TILING_OPTIMAL = 0
     private const val VK_IMAGE_LAYOUT_GENERAL = 1
@@ -27,6 +30,9 @@ internal object VulkanSkijaBackend : SkijaBackend {
 
     // Orders our write before MC's blit read (0-latency); created with the shared device/queue.
     private var barrier: VulkanFrameBarrier? = null
+    private var profiler: VulkanGpuProfiler? = null
+
+    override val gpuProfiler: GpuProfiler get() = profiler ?: UnsupportedGpuProfiler
 
     override val context: DirectContext
         get() = cached ?: createContext().also { cached = it }
@@ -39,6 +45,7 @@ internal object VulkanSkijaBackend : SkijaBackend {
         val queue = device.graphicsQueue()
 
         barrier = VulkanFrameBarrier(vkDevice, queue.vkQueue(), queue.queueFamilyIndex())
+        profiler = VulkanGpuProfiler(vkDevice, vkPhysicalDevice, queue.vkQueue(), queue.queueFamilyIndex())
 
         val getInstanceProcAddr = VK.getFunctionProvider().getFunctionAddress("vkGetInstanceProcAddr")
         val getDeviceProcAddr = VK10.vkGetInstanceProcAddr(vkInstance, "vkGetDeviceProcAddr")
@@ -109,6 +116,8 @@ internal object VulkanSkijaBackend : SkijaBackend {
     }
 
     override fun dispose() {
+        profiler?.dispose()
+        profiler = null
         barrier?.dispose()
         barrier = null
         cached?.close()

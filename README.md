@@ -119,6 +119,7 @@ a convenience for one managed source — screens compose on top of HUD.)
 API surface lives under `org.blackaddons.blackskija.api`:
 
 - `Skija` — shapes, rects, circles, gradients, shadows, clipping, transforms, alpha
+- `SkijaProfiler` — opt-in CPU/GPU timings for queued drawing ranges
 - `Gradient` — gradient direction helpers
 - `SkijaFonts` — custom font registration
 - `draw.SkijaText` — text: alignment, shadow, gradient, word-wrap

@@ -44,8 +44,11 @@ object Skija {
     // (alpha/push/pop) share the list with draws so per-call alpha and transforms sequence right.
     private val batch = ArrayList<(Canvas) -> Unit>()
 
-    /** Global antialiasing toggle, read at composite time. Persistent, not per-call or per-frame. */
+    /** Default antialiasing state used at the start of every composed range. */
     var antiAlias: Boolean = true
+
+    private var activeAntiAlias: Boolean = true
+    private val antiAliasStack = ArrayDeque<Boolean>()
 
     private var alpha: Float = 1f
     private val alphaStack = ArrayDeque<Float>()
@@ -63,41 +66,53 @@ object Skija {
 
     internal fun discard() {
         batch.clear()
+        SkijaProfiler.discard()
     }
 
-    /**
-     * Replays `batch[from, to)` onto [canvas]. The compositor splits the frame at the HUD boundary
-     * and replays each range onto its own surface, so pass [to] = [Int.MAX_VALUE] for the last range
-     * to keep picking up ops an op queues mid-replay. Does not clear the batch — [discard] does,
-     * once every range has been replayed.
-     */
-    internal fun flush(canvas: Canvas, pose: Matrix3x2fc, from: Int = 0, to: Int = Int.MAX_VALUE) {
+    internal class FlushSession internal constructor(
+        val canvas: Canvas,
+        val baseSave: Int,
+    )
+
+    /** Starts one isolated replay pass. All slices in the pass share render state. */
+    internal fun beginFlush(canvas: Canvas, pose: Matrix3x2fc): FlushSession {
         alpha = 1f
         alphaStack.clear()
+        activeAntiAlias = antiAlias
+        antiAliasStack.clear()
         saveDepth = 0
         val base = canvas.save()
         canvas.concat(pose.toMatrix33())
-        try {
-            // Indexed loop: tolerant of op queuing further work mid-replay.
-            var i = from
-            while (i < minOf(to, batch.size)) {
-                batch[i](canvas)
-                i++
-            }
-        } finally {
-            if (saveDepth != 0 || alphaStack.isNotEmpty()) {
-                LOG.warn(
-                    "BlackSkija: unbalanced push/pushScissor in frame (saveDepth={}, alphaStack={}) - auto-unwound",
-                    saveDepth, alphaStack.size,
-                )
-            }
-            // Unwind to base regardless of imbalance or a mid-batch throw, so leftover clips or
-            // transforms can't bleed into the next range or frame (the canvas is reused).
-            canvas.restoreToCount(base)
-            alpha = 1f
-            alphaStack.clear()
-            saveDepth = 0
+        return FlushSession(canvas, base)
+    }
+
+    /** Replays one slice of the active pass without resetting render state. */
+    internal fun flush(session: FlushSession, from: Int = 0, to: Int = Int.MAX_VALUE) {
+        val canvas = session.canvas
+        // Indexed loop: tolerant of op queuing further work mid-replay.
+        var i = from
+        while (i < minOf(to, batch.size)) {
+            batch[i](canvas)
+            i++
         }
+    }
+
+    /** Finishes the active pass and prevents unbalanced caller state leaking into the next frame. */
+    internal fun endFlush(session: FlushSession) {
+        if (saveDepth != 0 || alphaStack.isNotEmpty() || antiAliasStack.isNotEmpty()) {
+            LOG.warn(
+                "BlackSkija: unbalanced render state in frame (saveDepth={}, alphaStack={}, antiAliasStack={}) - auto-unwound",
+                saveDepth, alphaStack.size, antiAliasStack.size,
+            )
+        }
+        // Unwind to base regardless of imbalance or a mid-batch throw, so leftover clips or
+        // transforms can't bleed into the next range or frame (the canvas is reused).
+        session.canvas.restoreToCount(session.baseSave)
+        alpha = 1f
+        alphaStack.clear()
+        activeAntiAlias = antiAlias
+        antiAliasStack.clear()
+        saveDepth = 0
     }
 
     private fun draw(op: (Canvas) -> Unit) {
@@ -135,6 +150,15 @@ object Skija {
 
     fun globalAlpha(amount: Number) = draw { alpha = amount.toFloat().coerceIn(0f, 1f) }
 
+    fun pushAntiAlias(enabled: Boolean) = draw {
+        antiAliasStack.addLast(activeAntiAlias)
+        activeAntiAlias = enabled
+    }
+
+    fun popAntiAlias() = draw {
+        activeAntiAlias = if (antiAliasStack.isNotEmpty()) antiAliasStack.removeLast() else antiAlias
+    }
+
     fun pushScissor(x: Number, y: Number, w: Number, h: Number) = draw {
         it.save()
         saveDepth++
@@ -162,6 +186,21 @@ object Skija {
     fun rect(x: Number, y: Number, w: Number, h: Number, color: Color, radius: Number) =
         rect(x.toFloat(), y.toFloat(), w.toFloat(), h.toFloat(), color, radius.toFloat())
 
+    data class BatchRect(val x: Float, val y: Float, val width: Float, val height: Float)
+
+    fun rects(rects: List<BatchRect>, color: Color, radius: Number = 0f) {
+        if (rects.isEmpty()) return
+        val cornerRadius = radius.toFloat()
+        draw { canvas ->
+            val fill = fill(color)
+            for (rect in rects) {
+                val bounds = Rect.makeXYWH(rect.x, rect.y, rect.width, rect.height)
+                if (cornerRadius == 0f) canvas.drawRect(bounds, fill)
+                else canvas.drawRRect(RRect.makeXYWH(rect.x, rect.y, rect.width, rect.height, cornerRadius), fill)
+            }
+        }
+    }
+
     fun hollowRect(x: Float, y: Float, w: Float, h: Float, thickness: Float, color: Color, radius: Float) = draw {
         it.drawRRect(RRect.makeXYWH(x, y, w, h, radius), stroke(color, thickness))
     }
@@ -187,7 +226,7 @@ object Skija {
         val rect = RRect.makeXYWH(x.toFloat() - s, y.toFloat() - s, w.toFloat() + 2 * s, h.toFloat() + 2 * s, radius.toFloat())
         val sigma = blur.toFloat() / 2f
         paint.reset()
-        paint.isAntiAlias = antiAlias
+        paint.isAntiAlias = activeAntiAlias
         paint.color = argb(color)
         paint.maskFilter = blurMask(sigma)
         it.drawRRect(rect, paint)
@@ -225,7 +264,7 @@ object Skija {
         val fx = x.toFloat(); val fy = y.toFloat(); val fw = w.toFloat(); val fh = h.toFloat()
         val shader = linearShader(fx, fy, fw, fh, gradient, colors, stops)
         paint.reset()
-        paint.isAntiAlias = antiAlias
+        paint.isAntiAlias = activeAntiAlias
         paint.shader = shader
         it.drawRRect(RRect.makeXYWH(fx, fy, fw, fh, radius.toFloat()), paint)
         paint.shader = null
@@ -293,13 +332,13 @@ object Skija {
         val dstRect = Rect.makeXYWH(x, y, w, h)
         val tintFilter = tint?.let { ColorFilter.makeBlend(argb(it), BlendMode.MODULATE) }
         imgPaint.reset()
-        imgPaint.isAntiAlias = antiAlias
+        imgPaint.isAntiAlias = activeAntiAlias
         imgPaint.colorFilter = tintFilter
         if (tintFilter == null) imgPaint.color = argb(Color.WHITE) // alpha = global alpha
         val rounded = radius > 0f
         if (rounded) {
             canvas.save()
-            canvas.clipRRect(RRect.makeXYWH(x, y, w, h, radius), antiAlias)
+            canvas.clipRRect(RRect.makeXYWH(x, y, w, h, radius), activeAntiAlias)
         }
         canvas.drawImageRect(image, srcRect, dstRect, sampling(srcRect, dstRect), imgPaint, true)
         if (rounded) canvas.restore()
@@ -319,14 +358,14 @@ object Skija {
     enum class Align { LEFT, CENTER, RIGHT }
 
     fun text(text: String, x: Number, y: Number, size: Number, color: Color, family: String = SkijaFonts.DEFAULT) = draw {
-        TextLayoutCache.drawSolid(it, text, size.toFloat(), family, Float.POSITIVE_INFINITY, 1f, argb(color), antiAlias, x.toFloat(), y.toFloat())
+        TextLayoutCache.drawSolid(it, text, size.toFloat(), family, Float.POSITIVE_INFINITY, 1f, argb(color), activeAntiAlias, x.toFloat(), y.toFloat())
     }
 
     /** [text] with a 1px-offset dark drop shadow underneath. */
     fun textShadow(text: String, x: Number, y: Number, size: Number, color: Color, family: String = SkijaFonts.DEFAULT) = draw {
         val fx = x.toFloat(); val fy = y.toFloat(); val fs = size.toFloat()
-        TextLayoutCache.drawSolid(it, text, fs, family, Float.POSITIVE_INFINITY, 1f, argb(Color(0, 0, 0, color.alpha)), antiAlias, fx + 1f, fy + 1f)
-        TextLayoutCache.drawSolid(it, text, fs, family, Float.POSITIVE_INFINITY, 1f, argb(color), antiAlias, fx, fy)
+        TextLayoutCache.drawSolid(it, text, fs, family, Float.POSITIVE_INFINITY, 1f, argb(Color(0, 0, 0, color.alpha)), activeAntiAlias, fx + 1f, fy + 1f)
+        TextLayoutCache.drawSolid(it, text, fs, family, Float.POSITIVE_INFINITY, 1f, argb(color), activeAntiAlias, fx, fy)
     }
 
     /** Width of [text] at [size]. Render-thread only (builds/reuses a native paragraph). */
@@ -356,7 +395,7 @@ object Skija {
         val fx = x.toFloat(); val fy = y.toFloat(); val fs = size.toFloat()
         val shader = linearShader(fx, fy, TextLayoutCache.measureWidth(text, fs, family), fs, gradient, colors, stops)
         textPaint.reset()
-        textPaint.isAntiAlias = antiAlias
+        textPaint.isAntiAlias = activeAntiAlias
         textPaint.shader = shader
         // updateForegroundPaint copies the paint and refs the shader into the cached paragraph,
         // so closing our handle right after painting is safe.
@@ -385,7 +424,7 @@ object Skija {
         // Layout is color-independent: measure now, reuse the same cached paragraph at draw time.
         val height = TextLayoutCache.measureHeight(text, fs, family, mw, lh)
         draw {
-            TextLayoutCache.drawSolid(it, text, fs, family, mw, lh, argb(color), antiAlias, x.toFloat(), y.toFloat())
+            TextLayoutCache.drawSolid(it, text, fs, family, mw, lh, argb(color), activeAntiAlias, x.toFloat(), y.toFloat())
         }
         return height
     }
@@ -401,7 +440,7 @@ object Skija {
 
     private fun fill(color: Color): Paint {
         paint.reset()
-        paint.isAntiAlias = antiAlias
+        paint.isAntiAlias = activeAntiAlias
         paint.mode = PaintMode.FILL
         paint.color = argb(color)
         return paint
@@ -409,7 +448,7 @@ object Skija {
 
     private fun stroke(color: Color, width: Float): Paint {
         paint.reset()
-        paint.isAntiAlias = antiAlias
+        paint.isAntiAlias = activeAntiAlias
         paint.mode = PaintMode.STROKE
         paint.strokeWidth = width
         paint.color = argb(color)
