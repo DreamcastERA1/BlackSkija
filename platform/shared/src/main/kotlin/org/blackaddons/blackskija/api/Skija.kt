@@ -19,7 +19,11 @@ import org.blackaddons.blackskija.api.draw.SkijaSvg
 import org.joml.Matrix3x2fc
 import org.slf4j.LoggerFactory
 import java.awt.Color
+import kotlin.math.PI
+import kotlin.math.acos
 import kotlin.math.roundToInt
+import kotlin.math.sqrt
+import kotlin.math.tan
 
 /**
  * Backend-agnostic drawing surface, a thin API over a Skija Canvas. Coordinates take [Number]
@@ -64,10 +68,6 @@ object Skija {
 
     // Blur masks reused across frames, keyed by sigma. Never closed; they live for the process.
     private val blurMaskCache = HashMap<Float, MaskFilter>()
-
-    // Corner-rounding effects, keyed by radius. Never closed, like the blur masks: a UI draws the
-    // same handful of radii for the life of the process.
-    private val cornerEffectCache = HashMap<Float, PathEffect>()
 
     internal fun hasContent(): Boolean = batch.isNotEmpty()
 
@@ -264,7 +264,7 @@ object Skija {
 
     /**
      * Filled polygon through [points] - interleaved `x, y`, three vertices or more - closed back to
-     * the first. [corner] rounds every vertex by that radius in pixels.
+     * the first. [corner] traces a tangent arc at every vertex by that radius in pixels.
      *
      * One shape and one antialiased outline for an outline a rect cannot make: an L, a notch, a
      * speech bubble tail. Built from overlapping rects instead, each rect antialiases its own edge
@@ -273,10 +273,9 @@ object Skija {
     fun polygon(points: FloatArray, color: Color, corner: Number = 0) {
         requirePolygon(points)
         draw {
-            val paint = fill(color).withCorner(corner.toFloat())
-            val path = Path.makePolygon(vertices(points), true)
+            val path = polygonPath(points, corner.toFloat())
+            val paint = fill(color)
             it.drawPath(path, paint)
-            paint.pathEffect = null
             path.close()
         }
     }
@@ -285,11 +284,10 @@ object Skija {
     fun hollowPolygon(points: FloatArray, thickness: Number, color: Color, corner: Number = 0) {
         requirePolygon(points)
         draw {
-            val paint = stroke(color, thickness.toFloat()).withCorner(corner.toFloat())
+            val paint = stroke(color, thickness.toFloat())
             paint.strokeJoin = PaintStrokeJoin.ROUND
-            val path = Path.makePolygon(vertices(points), true)
+            val path = polygonPath(points, corner.toFloat())
             it.drawPath(path, paint)
-            paint.pathEffect = null
             path.close()
         }
     }
@@ -376,8 +374,57 @@ object Skija {
     private fun vertices(points: FloatArray): Array<Point> =
         Array(points.size / 2) { Point(points[it * 2], points[it * 2 + 1]) }
 
-    private fun Paint.withCorner(radius: Float): Paint = apply {
-        pathEffect = if (radius > 0f) cornerEffectCache.getOrPut(radius) { PathEffect.makeCorner(radius) } else null
+    private data class RoundedCorner(val start: Point, val radius: Float)
+
+    private fun polygonPath(points: FloatArray, corner: Float): Path {
+        if (corner <= 0f) return Path.makePolygon(vertices(points), true)
+
+        val vertices = vertices(points)
+        val corners = Array(vertices.size) { index ->
+            roundedCorner(
+                vertices[(index - 1 + vertices.size) % vertices.size],
+                vertices[index],
+                vertices[(index + 1) % vertices.size],
+                corner,
+            )
+        }
+        return PathBuilder().use { builder ->
+            // closePath only joins the last edge to this point; start at the first arc's tangent
+            // so it stays curved too instead of leaving one sharp vertex.
+            builder.moveTo(corners[0].start)
+            for (index in vertices.indices) {
+                val vertex = vertices[index]
+                val next = vertices[(index + 1) % vertices.size]
+                val radius = corners[index].radius
+                if (radius > 0f) builder.tangentArcTo(vertex, next, radius)
+                else builder.lineTo(vertex)
+            }
+            builder.closePath()
+            builder.detach()
+        }
+    }
+
+    private fun roundedCorner(previous: Point, vertex: Point, next: Point, requestedRadius: Float): RoundedCorner {
+        val incomingX = previous.x - vertex.x
+        val incomingY = previous.y - vertex.y
+        val outgoingX = next.x - vertex.x
+        val outgoingY = next.y - vertex.y
+        val incomingLength = sqrt(incomingX * incomingX + incomingY * incomingY)
+        val outgoingLength = sqrt(outgoingX * outgoingX + outgoingY * outgoingY)
+        if (incomingLength == 0f || outgoingLength == 0f) return RoundedCorner(vertex, 0f)
+
+        val cosine = ((incomingX * outgoingX + incomingY * outgoingY) / (incomingLength * outgoingLength))
+            .coerceIn(-1f, 1f)
+        val halfAngle = acos(cosine) / 2f
+        if (halfAngle <= 0f || halfAngle >= (PI / 2).toFloat()) return RoundedCorner(vertex, 0f)
+
+        val tangent = tan(halfAngle)
+        val distance = (requestedRadius / tangent).coerceAtMost(minOf(incomingLength, outgoingLength) / 2f)
+        val radius = distance * tangent
+        return RoundedCorner(
+            Point(vertex.x + incomingX / incomingLength * distance, vertex.y + incomingY / incomingLength * distance),
+            radius,
+        )
     }
 
     /**

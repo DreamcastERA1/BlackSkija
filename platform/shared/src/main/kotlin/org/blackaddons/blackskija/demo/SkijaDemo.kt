@@ -185,8 +185,7 @@ object SkijaDemo {
         }
 
         cell(0, 3, "polygon") { x, y, w, h ->
-            // An L in one call, sharp, and the same outline rounded — the shape two rects can only
-            // approximate, seam and all.
+            // One L with real tangent arcs at its elbows - the shape two rects cannot make cleanly.
             val ox = x + 14
             val oy = y + 14
             val side = minOf(w - 28, h - 34)
@@ -199,7 +198,7 @@ object SkijaDemo {
                 ox + side, oy + side,
                 ox, oy + side,
             )
-            Skija.polygon(l, Color(90, 130, 255, 90))
+            Skija.polygon(l, Color(90, 130, 255, 90), corner = 6)
             Skija.hollowPolygon(l, 1.5, ACCENT, corner = 6)
         }
 
