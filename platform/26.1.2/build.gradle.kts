@@ -1,5 +1,3 @@
-import net.fabricmc.loom.configuration.providers.minecraft.SingleJarMinecraftProvider.client
-
 // :platform:26.1.2 — the Minecraft 26.1.2 build: GL-only (no Vulkan backend on this version).
 plugins {
     id("blackskija.platform")

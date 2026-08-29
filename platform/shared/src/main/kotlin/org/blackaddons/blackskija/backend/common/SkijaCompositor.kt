@@ -10,12 +10,14 @@ import net.minecraft.client.gui.render.TextureSetup
 import net.minecraft.client.renderer.RenderPipelines
 import net.minecraft.client.renderer.state.gui.BlitRenderState
 import net.minecraft.client.renderer.state.gui.GuiRenderState
+import org.blackaddons.blackskija.api.DeferredFree
 import org.blackaddons.blackskija.api.Skija
 import org.blackaddons.blackskija.api.SkijaProfiler
 import org.blackaddons.blackskija.api.TextLayoutCache
 import org.blackaddons.blackskija.api.draw.SkijaEntity
 import org.blackaddons.blackskija.api.draw.SkijaItems
 import org.blackaddons.blackskija.api.screen.SkijaOverlay
+import org.blackaddons.blackskija.backend.common.SkijaCompositor.composite
 import org.blackaddons.blackskija.backend.natives.SkijaNatives
 import org.joml.Matrix3x2f
 import org.slf4j.LoggerFactory
@@ -177,11 +179,11 @@ object SkijaCompositor {
             if (hudSplit > 0) render(backend, hudTarget, pose, 0, hudSplit)
 
             // Everything queued after the HUD finished — a Skija screen, tooltips — plus whatever
-            // content() just added. It goes on top, so its blit is registered here, at the topmost layer.
+            // content() just added. It goes on top, in a stratum of its own; see [addTopmostBlit].
             val overlayFrom = hudSplit.coerceAtLeast(0)
             if (Skija.size() > overlayFrom) {
                 render(backend, overlayTarget, pose, overlayFrom, Int.MAX_VALUE)
-                overlayTarget.view?.let { addBlit(guiRenderState, backend, it, window.guiScaledWidth, window.guiScaledHeight) }
+                overlayTarget.view?.let { addTopmostBlit(guiRenderState, backend, it, window.guiScaledWidth, window.guiScaledHeight) }
             }
         } catch (t: Throwable) {
             LOG.error("BlackSkija compositing failed - disabling overlay", t)
@@ -190,8 +192,10 @@ object SkijaCompositor {
             // One batch feeds both buffers, so it is cleared once, after the last range is replayed.
             Skija.discard()
             // Both ranges have been flushed and submitted by now, so nothing pending can still point
-            // at a paragraph the replay evicted. This is the only safe moment to free them.
+            // at a paragraph the replay evicted, or at a vector a caller deleted mid-frame. This is
+            // the only safe moment to free either.
             TextLayoutCache.releaseEvicted()
+            DeferredFree.release()
             hudSplit = -1
             backend.restoreState()
             SkijaItems.endFrame()
@@ -230,6 +234,31 @@ object SkijaCompositor {
             Skija.endFlush(session)
         }
         backend.orderWriteBeforeRead(view)
+    }
+
+    /**
+     * Adds the overlay blit in a stratum of its own, so nothing Minecraft extracted this frame can
+     * paint over it.
+     *
+     * "Current layer" is not the top of the frame. A layer holds its blits and its *glyphs*
+     * separately and always draws the glyphs last (`GuiRenderState.forEachElement` walks
+     * `elementStates` then `glyphStates` per node), and which layer is current at this point is
+     * simply wherever the last thing Minecraft extracted happened to land. So an overlay blit added
+     * here comes out underneath the text of that same layer — which is how a picture previewed over
+     * the chat ended up beneath the chat lines, since a focused chat is extracted by `ChatScreen`
+     * rather than by the HUD.
+     *
+     * A new stratum is appended after every existing one and traversed last, elements and glyphs
+     * alike, which is the only placement that means "above everything" rather than "above some of
+     * it". Safe here because extraction is over by the time `GuiRenderer.render` begins: the
+     * strata are about to be walked, not added to.
+     */
+    private fun addTopmostBlit(
+        guiRenderState: GuiRenderState, backend: SkijaBackend, blitView: GpuTextureView,
+        guiScaledWidth: Int, guiScaledHeight: Int,
+    ) {
+        guiRenderState.nextStratum()
+        addBlit(guiRenderState, backend, blitView, guiScaledWidth, guiScaledHeight)
     }
 
     /** Adds a full-screen blit of [blitView] into the GUI render state's current layer. */

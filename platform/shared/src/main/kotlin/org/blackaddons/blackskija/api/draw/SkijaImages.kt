@@ -1,28 +1,45 @@
 package org.blackaddons.blackskija.api.draw
 
+import io.github.humbleui.skija.Codec
+import io.github.humbleui.skija.Data
 import io.github.humbleui.skija.Image
 import net.minecraft.client.Minecraft
 import net.minecraft.client.renderer.texture.TextureAtlas
 import net.minecraft.resources.Identifier
+import org.blackaddons.blackskija.api.DeferredFree
 import org.blackaddons.blackskija.api.Skija
 import org.blackaddons.blackskija.api.SkijaTextures
+import org.blackaddons.blackskija.api.draw.SkijaImages.animated
 import org.blackaddons.blackskija.api.draw.SkijaImages.drawMc
 import org.blackaddons.blackskija.api.draw.SkijaImages.drawMcSprite
+import org.blackaddons.blackskija.api.draw.SkijaImages.fromEncoded
 import org.blackaddons.blackskija.api.draw.SkijaImages.resource
 import java.awt.Color
 
 /**
  * Image sources for the [Skija] draw layer:
  *  - [resource]: decode a classpath PNG/JPG into a cached Skija [Image].
+ *  - [animated]: a GIF or animated WebP as a [SkijaAnimation], a frame at a time.
  *  - [drawMc] / [drawMcSprite]: draw a live Minecraft texture (resource-pack aware) by borrowing
  *    its GPU handle, no CPU copy.
  */
 object SkijaImages {
 
     private const val RESOURCE_CACHE_MAX = 128
+    private const val ANIMATION_CACHE_MAX = 16
+
+    // Evicting parks the handle rather than closing it: a draw queued earlier this frame still
+    // points at it and only replays at the flush. See [DeferredFree].
     private val resourceCache = object : LinkedHashMap<String, Image>(32, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Image>): Boolean {
-            if (size > RESOURCE_CACHE_MAX) { runCatching { eldest.value.close() }; return true }
+            if (size > RESOURCE_CACHE_MAX) { DeferredFree.later(eldest.value); return true }
+            return false
+        }
+    }
+
+    private val animationCache = object : LinkedHashMap<String, SkijaAnimation>(8, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, SkijaAnimation>): Boolean {
+            if (size > ANIMATION_CACHE_MAX) { DeferredFree.later(eldest.value); return true }
             return false
         }
     }
@@ -44,9 +61,30 @@ object SkijaImages {
         Image.makeDeferredFromEncodedBytes(bytes)
     }
 
-    /** Drops a cached [resource] image and frees it. */
+    /**
+     * Decodes an animated picture (GIF, animated WebP) under [key], cached like [fromEncoded].
+     * A still image is a legitimate one-frame animation, so this works for any format Skia reads.
+     *
+     * Unlike [fromEncoded] the decode is not deferred — reading the frame table is what tells the
+     * animation how long it is — so hand it bytes you already have.
+     */
+    fun animated(key: String, bytes: ByteArray): SkijaAnimation = animationCache.getOrPut(key) {
+        val data = Data.makeFromBytes(bytes)
+        val codec = try {
+            Codec.makeFromData(data)
+        } catch (e: IllegalArgumentException) {
+            data.close()
+            throw IllegalArgumentException("BlackSkija: not a picture Skia can decode: $key", e)
+        }
+        // The codec holds its own reference to the bytes; ours has done its job.
+        data.close()
+        SkijaAnimation(codec)
+    }
+
+    /** Drops a cached [resource], [fromEncoded] or [animated] entry and frees it after the frame. */
     fun delete(path: String) {
-        resourceCache.remove(path)?.close()
+        resourceCache.remove(path)?.let { DeferredFree.later(it) }
+        animationCache.remove(path)?.let { DeferredFree.later(it) }
     }
 
     /**

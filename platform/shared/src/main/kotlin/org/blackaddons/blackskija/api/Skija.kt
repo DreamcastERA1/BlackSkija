@@ -1,15 +1,21 @@
 package org.blackaddons.blackskija.api
 
 import io.github.humbleui.skija.*
+import io.github.humbleui.skija.skottie.Animation
+import io.github.humbleui.types.Point
 import io.github.humbleui.types.RRect
 import io.github.humbleui.types.Rect
 import org.blackaddons.blackskija.api.Skija.flush
 import org.blackaddons.blackskija.api.Skija.gradientRect
+import org.blackaddons.blackskija.api.Skija.image
+import org.blackaddons.blackskija.api.Skija.path
+import org.blackaddons.blackskija.api.Skija.polygon
 import org.blackaddons.blackskija.api.Skija.rect
 import org.blackaddons.blackskija.api.Skija.text
 import org.blackaddons.blackskija.api.Skija.textGradient
 import org.blackaddons.blackskija.api.Skija.textWidth
 import org.blackaddons.blackskija.api.Skija.wrappedTextBounds
+import org.blackaddons.blackskija.api.draw.SkijaSvg
 import org.joml.Matrix3x2fc
 import org.slf4j.LoggerFactory
 import java.awt.Color
@@ -58,6 +64,10 @@ object Skija {
 
     // Blur masks reused across frames, keyed by sigma. Never closed; they live for the process.
     private val blurMaskCache = HashMap<Float, MaskFilter>()
+
+    // Corner-rounding effects, keyed by radius. Never closed, like the blur masks: a UI draws the
+    // same handful of radii for the life of the process.
+    private val cornerEffectCache = HashMap<Float, PathEffect>()
 
     internal fun hasContent(): Boolean = batch.isNotEmpty()
 
@@ -251,6 +261,124 @@ object Skija {
 
     fun circle(x: Number, y: Number, radius: Number, color: Color) =
         circle(x.toFloat(), y.toFloat(), radius.toFloat(), color)
+
+    /**
+     * Filled polygon through [points] - interleaved `x, y`, three vertices or more - closed back to
+     * the first. [corner] rounds every vertex by that radius in pixels.
+     *
+     * One shape and one antialiased outline for an outline a rect cannot make: an L, a notch, a
+     * speech bubble tail. Built from overlapping rects instead, each rect antialiases its own edge
+     * and the seams between them stay visible against the background.
+     */
+    fun polygon(points: FloatArray, color: Color, corner: Number = 0) {
+        requirePolygon(points)
+        draw {
+            val paint = fill(color).withCorner(corner.toFloat())
+            val path = Path.makePolygon(vertices(points), true)
+            it.drawPath(path, paint)
+            paint.pathEffect = null
+            path.close()
+        }
+    }
+
+    /** Outline of [polygon], [thickness] pixels wide. */
+    fun hollowPolygon(points: FloatArray, thickness: Number, color: Color, corner: Number = 0) {
+        requirePolygon(points)
+        draw {
+            val paint = stroke(color, thickness.toFloat()).withCorner(corner.toFloat())
+            paint.strokeJoin = PaintStrokeJoin.ROUND
+            val path = Path.makePolygon(vertices(points), true)
+            it.drawPath(path, paint)
+            paint.pathEffect = null
+            path.close()
+        }
+    }
+
+    /**
+     * Draws [path] - authored in a square `viewBox`-unit box, the way an SVG icon set is - into a
+     * [size]-pixel square at ([x], [y]), scaled uniformly. [thickness] is a stroke width **in
+     * viewBox units** (so an icon keeps its weight at every size); 0 fills the path instead.
+     *
+     * The box comes from [viewBox] rather than from the path's own bounds on purpose: measured
+     * bounds would blow every glyph up to fill the box, and a set whose icons no longer share a
+     * baseline or a size is not a set. Parse and cache the path with
+     * [org.blackaddons.blackskija.api.draw.SkijaVectors].
+     */
+    fun path(
+        path: Path, x: Number, y: Number, size: Number, color: Color,
+        viewBox: Number = 24, thickness: Number = 0,
+    ) = draw {
+        val scale = size.toFloat() / viewBox.toFloat()
+        val stroke = thickness.toFloat()
+        val paint = if (stroke > 0f) stroke(color, stroke).apply {
+            strokeJoin = PaintStrokeJoin.ROUND
+            strokeCap = PaintStrokeCap.ROUND
+        } else fill(color)
+        it.save()
+        it.translate(x.toFloat(), y.toFloat())
+        it.scale(scale, scale)
+        it.drawPath(path, paint)
+        it.restore()
+    }
+
+    /**
+     * Renders a whole SVG document into the box at ([x], [y]) - art with its own fills, strokes and
+     * gradients, which [path] deliberately cannot express.
+     *
+     * Fills the box, the way [image] fills its destination rect: a document authored in a `viewBox`
+     * is scaled into it, so a file that declares itself 24 pixels wide still draws at whatever size
+     * is asked for. Only a document with no `viewBox` at all is left to lay itself out against the
+     * box. Load it with [org.blackaddons.blackskija.api.draw.SkijaVectors].
+     */
+    fun svg(svg: SkijaSvg, x: Number, y: Number, w: Number, h: Number) = draw {
+        val fx = x.toFloat(); val fy = y.toFloat(); val fw = w.toFloat(); val fh = h.toFloat()
+        // The document paints itself, so the global alpha can only be applied to the result.
+        val layer = if (alpha < 1f) it.saveLayerAlpha(Rect.makeXYWH(fx, fy, fw, fh), (alpha * 255).roundToInt()) else it.save()
+        it.translate(fx, fy)
+        val box = svg.viewBox
+        if (box == null) {
+            svg.dom.setContainerSize(fw, fh)
+        } else {
+            svg.dom.setContainerSize(box.width, box.height)
+            it.scale(fw / box.width, fh / box.height)
+            it.translate(-box.left, -box.top)
+        }
+        svg.dom.render(it)
+        it.restoreToCount(layer)
+    }
+
+    /**
+     * Renders a Lottie animation into the box at ([x], [y]), at [elapsedMs] since it started,
+     * looping. Vector all the way to the pixel, so it is as sharp at 200 pixels as at 20 - which is
+     * the whole reason an animated sticker arrives as one.
+     *
+     * Seeking happens here, inside the frame, not when the call was made: one animation drawn twice
+     * in a frame at two different times is two different pictures, and an animation seeked at queue
+     * time would show the last seek for both. Load it with
+     * [org.blackaddons.blackskija.api.draw.SkijaLottie].
+     */
+    fun lottie(animation: Animation, elapsedMs: Long, x: Number, y: Number, w: Number, h: Number) = draw {
+        val fx = x.toFloat(); val fy = y.toFloat(); val fw = w.toFloat(); val fh = h.toFloat()
+        // Guarded in milliseconds rather than seconds: an animation shorter than a millisecond
+        // rounds its loop length to zero, and the modulo below is a division.
+        val loopMs = (animation.duration * 1000f).toLong()
+        if (loopMs > 0L) animation.seekFrameTime(elapsedMs % loopMs / 1000f)
+        // The animation paints itself, so the global alpha can only be applied to the result.
+        val layer = if (alpha < 1f) it.saveLayerAlpha(Rect.makeXYWH(fx, fy, fw, fh), (alpha * 255).roundToInt()) else it.save()
+        animation.render(it, Rect.makeXYWH(fx, fy, fw, fh))
+        it.restoreToCount(layer)
+    }
+
+    private fun requirePolygon(points: FloatArray) = require(points.size >= 6 && points.size % 2 == 0) {
+        "BlackSkija: a polygon takes interleaved x, y for three vertices or more, got ${points.size} floats"
+    }
+
+    private fun vertices(points: FloatArray): Array<Point> =
+        Array(points.size / 2) { Point(points[it * 2], points[it * 2 + 1]) }
+
+    private fun Paint.withCorner(radius: Float): Paint = apply {
+        pathEffect = if (radius > 0f) cornerEffectCache.getOrPut(radius) { PathEffect.makeCorner(radius) } else null
+    }
 
     /**
      * Filled rounded rect painted with a linear gradient across [colors] (2+). [stops], if given,

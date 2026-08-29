@@ -7,8 +7,7 @@ import net.minecraft.client.renderer.state.gui.pip.GuiEntityRenderState
 import net.minecraft.client.renderer.state.gui.pip.PictureInPictureRenderState
 import org.blackaddons.blackskija.api.Skija
 import org.blackaddons.blackskija.api.SkijaTextures
-import java.util.Collections
-import java.util.IdentityHashMap
+import java.util.*
 
 /**
  * Draws a Minecraft entity (a player model, a mob) into the Skija UI layer, so it composites in

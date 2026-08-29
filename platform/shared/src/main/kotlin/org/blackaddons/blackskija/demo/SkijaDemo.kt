@@ -6,9 +6,7 @@ import net.minecraft.world.item.ItemStack
 import net.minecraft.world.item.Items
 import org.blackaddons.blackskija.api.Gradient
 import org.blackaddons.blackskija.api.Skija
-import org.blackaddons.blackskija.api.draw.SkijaImages
-import org.blackaddons.blackskija.api.draw.SkijaItems
-import org.blackaddons.blackskija.api.draw.SkijaText
+import org.blackaddons.blackskija.api.draw.*
 import org.blackaddons.blackskija.backend.common.SkijaBackends
 import java.awt.Color
 import kotlin.math.PI
@@ -27,6 +25,14 @@ object SkijaDemo {
     private val BLOCK_ATLAS = Identifier.withDefaultNamespace("textures/atlas/blocks.png")
     private val STONE_SPRITE = Identifier.withDefaultNamespace("block/stone")
     private const val ICON = "/assets/blackskija/icon.png"
+    private const val BADGE_SVG = "/assets/blackskija/demo/badge.svg"
+    private const val SPINNER_LOTTIE = "/assets/blackskija/demo/spinner.json"
+    private const val ORBIT_GIF = "/assets/blackskija/demo/orbit.gif"
+
+    // Icon paths in a 24-unit box, the shape every line-icon set ships in.
+    private const val ICON_CHECK = "M20 6 9 17l-5-5"
+    private const val ICON_PLUS = "M5 12h14M12 5v14"
+    private const val ICON_PLAY = "M8 5v14l11-7z"
 
     private val DEMO_ITEM by lazy { ItemStack(Items.DIAMOND_SWORD) }
 
@@ -37,7 +43,7 @@ object SkijaDemo {
         val t = (System.nanoTime() / 1_000_000L) / 1000.0
 
         val pw = (sw * 0.7f).coerceIn(460f, 820f)
-        val ph = (sh * 0.72f).coerceIn(400f, 620f)
+        val ph = (sh * 0.78f).coerceIn(470f, 720f)
         val px = (sw - pw) / 2f
         val py = (sh - ph) / 2f
 
@@ -57,7 +63,7 @@ object SkijaDemo {
 
         SkijaImages.drawMcSprite(BLOCK_ATLAS, STONE_SPRITE, px + 14, py + ph - 22, 16, 16)
         SkijaText.draw(
-            "rect · gradient · circle · line · rotate · scissor · alpha · text · item",
+            "rect · gradient · line · rotate · scissor · alpha · text · item · polygon · vector · animation",
             px + pw / 2, py + ph - 17, MUTED, 9f, align = Skija.Align.CENTER, shadow = true,
         )
 
@@ -67,7 +73,7 @@ object SkijaDemo {
         val bw = pw - pad * 2
         val bh = ph - titleH - footerH - pad * 2
         val cols = 4
-        val rows = 3
+        val rows = 4
         val gap = 14f
         val cw = (bw - gap * (cols - 1)) / cols
         val ch = (bh - gap * (rows - 1)) / rows
@@ -177,5 +183,55 @@ object SkijaDemo {
             // not under it. Inset above the cell's label.
             DemoEntity.draw(x, y + 4, w, h - 20, t)
         }
+
+        cell(0, 3, "polygon") { x, y, w, h ->
+            // An L in one call, sharp, and the same outline rounded — the shape two rects can only
+            // approximate, seam and all.
+            val ox = x + 14
+            val oy = y + 14
+            val side = minOf(w - 28, h - 34)
+            val arm = side * 0.42f
+            val l = floatArrayOf(
+                ox, oy,
+                ox + arm, oy,
+                ox + arm, oy + side - arm,
+                ox + side, oy + side - arm,
+                ox + side, oy + side,
+                ox, oy + side,
+            )
+            Skija.polygon(l, Color(90, 130, 255, 90))
+            Skija.hollowPolygon(l, 1.5, ACCENT, corner = 6)
+        }
+
+        cell(1, 3, "svg path") { x, y, w, h ->
+            // Path data drawn with our own paint, which is what makes one file serve every colour
+            // and size. Stroked icons keep their weight as the size changes; a filled one has none.
+            val big = minOf(w - 28, h - 40)
+            SkijaVectors.icon(ICON_CHECK, x + 14, y + 14, big, Color(120, 210, 150))
+            SkijaVectors.icon(ICON_PLUS, x + w - 40, y + 16, 18, INK)
+            SkijaVectors.icon(ICON_PLAY, x + w - 40, y + 40, 18, Color(255, 170, 90), thickness = 0)
+        }
+
+        cell(2, 3, "svg doc") { x, y, w, h ->
+            // The file states width="24" height="24"; drawing it far larger is the proof the box is
+            // honoured rather than the document's own opinion of its size.
+            val side = minOf(w, h) - 26
+            Skija.svg(SkijaVectors.svgResource(BADGE_SVG), x + (w - side) / 2, y + (h - side) / 2 - 5, side, side)
+        }
+
+        cell(3, 3, "lottie · gif") { x, y, w, h ->
+            val ms = (t * 1000).toLong()
+            val side = minOf((w - 34) / 2, h - 30)
+            val cy = y + (h - side) / 2 - 5
+            Skija.lottie(SkijaLottie.resource(SPINNER_LOTTIE), ms, x + 12, cy, side, side)
+            SkijaImages.animated(ORBIT_GIF, gifBytes).draw(ms, x + w - side - 12, cy, side, side, radius = 8)
+        }
+    }
+
+    // Read on the first frame that draws it, then held: SkijaImages only looks at the bytes on a
+    // cache miss, but they would still be re-read off the classpath every frame to be handed over.
+    private val gifBytes: ByteArray by lazy {
+        SkijaDemo::class.java.getResourceAsStream(ORBIT_GIF)?.use { it.readBytes() }
+            ?: error("BlackSkija demo: $ORBIT_GIF missing")
     }
 }

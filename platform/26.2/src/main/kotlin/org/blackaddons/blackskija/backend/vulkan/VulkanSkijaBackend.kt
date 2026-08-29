@@ -7,9 +7,9 @@ import com.mojang.blaze3d.vulkan.VulkanConst
 import com.mojang.blaze3d.vulkan.VulkanDevice
 import com.mojang.blaze3d.vulkan.VulkanGpuTexture
 import io.github.humbleui.skija.*
-import org.blackaddons.blackskija.backend.common.SkijaBackend
 import org.blackaddons.blackskija.backend.common.GpuProfileBackend
 import org.blackaddons.blackskija.backend.common.GpuProfiler
+import org.blackaddons.blackskija.backend.common.SkijaBackend
 import org.blackaddons.blackskija.backend.common.UnsupportedGpuProfiler
 import org.lwjgl.vulkan.VK
 import org.lwjgl.vulkan.VK10

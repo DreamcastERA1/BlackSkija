@@ -3,18 +3,7 @@ package org.blackaddons.blackskija.backend.vulkan
 import org.blackaddons.blackskija.backend.common.GpuProfileSample
 import org.blackaddons.blackskija.backend.common.GpuProfiler
 import org.lwjgl.system.MemoryStack
-import org.lwjgl.vulkan.VK10
-import org.lwjgl.vulkan.VkCommandBuffer
-import org.lwjgl.vulkan.VkCommandBufferAllocateInfo
-import org.lwjgl.vulkan.VkCommandBufferBeginInfo
-import org.lwjgl.vulkan.VkCommandPoolCreateInfo
-import org.lwjgl.vulkan.VkDevice
-import org.lwjgl.vulkan.VkFenceCreateInfo
-import org.lwjgl.vulkan.VkPhysicalDevice
-import org.lwjgl.vulkan.VkPhysicalDeviceProperties
-import org.lwjgl.vulkan.VkQueryPoolCreateInfo
-import org.lwjgl.vulkan.VkSubmitInfo
-import org.lwjgl.vulkan.VkQueue
+import org.lwjgl.vulkan.*
 
 internal class VulkanGpuProfiler(
     private val device: VkDevice,

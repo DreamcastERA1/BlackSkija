@@ -2,12 +2,13 @@ package org.blackaddons.blackskija.api
 
 import io.github.humbleui.skija.Canvas
 import io.github.humbleui.skija.Paint
-import io.github.humbleui.skija.Font as SkFont
 import io.github.humbleui.skija.paragraph.Paragraph
 import io.github.humbleui.skija.paragraph.ParagraphBuilder
 import io.github.humbleui.skija.paragraph.ParagraphStyle
 import io.github.humbleui.skija.paragraph.TextStyle
 import org.blackaddons.blackskija.api.TextLayoutCache.Entry
+import org.blackaddons.blackskija.api.TextLayoutCache.evicted
+import io.github.humbleui.skija.Font as SkFont
 
 // Caches laid-out Skija Paragraphs (layout is Skija's costliest op), keyed by content+style+width,
 // not color: color/alpha is applied per draw. Render-thread only (native objects shared with flush).

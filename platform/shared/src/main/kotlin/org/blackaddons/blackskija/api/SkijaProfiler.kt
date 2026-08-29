@@ -1,7 +1,7 @@
 package org.blackaddons.blackskija.api
 
-import org.blackaddons.blackskija.backend.common.SkijaBackend
 import org.blackaddons.blackskija.backend.common.GpuProfileBackend
+import org.blackaddons.blackskija.backend.common.SkijaBackend
 
 /**
  * Opt-in timing for a range of queued Skija work.

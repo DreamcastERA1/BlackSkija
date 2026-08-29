@@ -3,8 +3,8 @@ package org.blackaddons.blackskija.backend.gl
 import com.mojang.blaze3d.opengl.GlTextureView
 import com.mojang.blaze3d.textures.GpuTextureView
 import io.github.humbleui.skija.*
-import org.blackaddons.blackskija.backend.common.SkijaBackend
 import org.blackaddons.blackskija.backend.common.GpuProfileBackend
+import org.blackaddons.blackskija.backend.common.SkijaBackend
 import org.lwjgl.opengl.GL11C
 import org.lwjgl.opengl.GL30C
 

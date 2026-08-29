@@ -15,8 +15,12 @@ so you get anti-aliased shapes, gradients, blur, drop shadows, and rich text wit
 
 ## Features
 
-- **Anti-aliased 2D** — rects, rounded / half-rounded rects, circles, lines, multi-stop
-  gradients, Gaussian drop shadows, clipping, transforms, per-call alpha.
+- **Anti-aliased 2D** — rects, rounded / half-rounded rects, circles, lines, polygons with
+  rounded corners, multi-stop gradients, Gaussian drop shadows, clipping, transforms, per-call
+  alpha.
+- **Vectors and animation** — SVG path data drawn in your own color (an icon set needs no PNGs),
+  whole SVG documents scaled into a box, animated GIF / WebP a frame at a time, and Lottie
+  rendered by Skia itself.
 - **Rich text** — Skija's paragraph engine: glyph fallback, measuring, word-wrap, gradient
   fill, and shadow. Bundled JetBrains Mono default; register your own fonts by family name.
 - **Minecraft textures, resource-pack aware** — draw live MC textures, atlas sprites, and
@@ -27,7 +31,8 @@ so you get anti-aliased shapes, gradients, blur, drop shadows, and rich text wit
   Gracefully disables on a GPU API it can't adapt. Most Skija/NanoVG UI mods are GL-only.
 - **Immediate-mode** — call from any render-thread hook, no begin/end; an idle frame costs nothing.
 - **Correct depth** — draws issued from a HUD hook composite *below* screens, the pause menu and the
-  resource-pack overlay; draws issued afterwards go on top. No HUD bleeding over open menus.
+  resource-pack overlay; draws issued afterwards go on top of everything Minecraft drew this frame,
+  its text included. No HUD bleeding over open menus.
 
 ## Requirements
 
@@ -123,7 +128,10 @@ API surface lives under `org.blackaddons.blackskija.api`:
 - `Gradient` — gradient direction helpers
 - `SkijaFonts` — custom font registration
 - `draw.SkijaText` — text: alignment, shadow, gradient, word-wrap
-- `draw.SkijaImages` — images and Minecraft sprites/atlases
+- `draw.SkijaImages` — images, animated pictures, and Minecraft sprites/atlases
+- `draw.SkijaVectors` — SVG path data (icons) and whole SVG documents
+- `draw.SkijaLottie` — Lottie animations
+- `draw.SkijaAnimation` — a frame of an animated picture, decoded on demand
 - `draw.SkijaItems` — rendering `ItemStack`s into the canvas
 - `screen.SkijaScreen` — base class for a Skija-drawn Minecraft screen
 - `screen.SkijaOverlay` — enable / route the single managed overlay source
