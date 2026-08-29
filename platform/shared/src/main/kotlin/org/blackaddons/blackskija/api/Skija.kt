@@ -410,13 +410,13 @@ object Skija {
         if (corner <= 0f) return Path.makePolygon(vertices(points), true)
 
         val vertices = vertices(points)
-        val winding = winding(vertices)
         val corners = Array(vertices.size) { index ->
-            val previous = vertices[(index - 1 + vertices.size) % vertices.size]
-            val vertex = vertices[index]
-            val next = vertices[(index + 1) % vertices.size]
-            if (isConvex(previous, vertex, next, winding)) roundedCorner(previous, vertex, next, corner)
-            else RoundedCorner(vertex, 0f)
+            roundedCorner(
+                vertices[(index - 1 + vertices.size) % vertices.size],
+                vertices[index],
+                vertices[(index + 1) % vertices.size],
+                corner,
+            )
         }
         return PathBuilder().use { builder ->
             // closePath only joins the last edge to this point; start at the first arc's tangent
@@ -455,24 +455,6 @@ object Skija {
             Point(vertex.x + incomingX / incomingLength * distance, vertex.y + incomingY / incomingLength * distance),
             radius,
         )
-    }
-
-    private fun winding(vertices: Array<Point>): Float {
-        var area = 0f
-        for (index in vertices.indices) {
-            val current = vertices[index]
-            val next = vertices[(index + 1) % vertices.size]
-            area += current.x * next.y - current.y * next.x
-        }
-        return area
-    }
-
-    private fun isConvex(previous: Point, vertex: Point, next: Point, winding: Float): Boolean {
-        val incomingX = vertex.x - previous.x
-        val incomingY = vertex.y - previous.y
-        val outgoingX = next.x - vertex.x
-        val outgoingY = next.y - vertex.y
-        return (incomingX * outgoingY - incomingY * outgoingX) * winding > 0f
     }
 
     /**
