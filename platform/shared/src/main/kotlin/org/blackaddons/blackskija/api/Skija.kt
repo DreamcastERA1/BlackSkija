@@ -280,6 +280,33 @@ object Skija {
         }
     }
 
+    /**
+     * Builds a reusable native path for a stable polygon. Pair it with [deletePolygon] when its
+     * geometry is no longer drawn; deferred drawing makes closing it immediately unsafe.
+     */
+    fun createPolygon(points: FloatArray, corner: Number = 0): PolygonPath {
+        requirePolygon(points)
+        RenderThread.require("a polygon path was created")
+        return PolygonPath(polygonPath(points, corner.toFloat()))
+    }
+
+    /** Draws a [PolygonPath] made by [createPolygon]. */
+    fun polygon(path: PolygonPath, color: Color) = draw {
+        check(!path.deleted) { "BlackSkija: a deleted polygon path was drawn" }
+        it.drawPath(path.native, fill(color))
+    }
+
+    /**
+     * Forgets a reusable [PolygonPath] after its final draw. Its native handle survives through
+     * the current flush so queued draws cannot observe freed memory.
+     */
+    fun deletePolygon(path: PolygonPath) {
+        RenderThread.require("a polygon path was deleted")
+        check(!path.deleted) { "BlackSkija: a polygon path was deleted twice" }
+        path.deleted = true
+        DeferredFree.later(path.native)
+    }
+
     /** Outline of [polygon], [thickness] pixels wide. */
     fun hollowPolygon(points: FloatArray, thickness: Number, color: Color, corner: Number = 0) {
         requirePolygon(points)
