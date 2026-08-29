@@ -19,7 +19,7 @@ import java.awt.Color
 /**
  * Image sources for the [Skija] draw layer:
  *  - [resource]: decode a classpath PNG/JPG into a cached Skija [Image].
- *  - [animated]: a GIF or animated WebP as a [SkijaAnimation], a frame at a time.
+ *  - [animated]: a GIF, animated WebP or APNG as a [SkijaAnimation], a frame at a time.
  *  - [drawMc] / [drawMcSprite]: draw a live Minecraft texture (resource-pack aware) by borrowing
  *    its GPU handle, no CPU copy.
  */
@@ -62,13 +62,18 @@ object SkijaImages {
     }
 
     /**
-     * Decodes an animated picture (GIF, animated WebP) under [key], cached like [fromEncoded].
+     * Decodes an animated picture (GIF, animated WebP, APNG) under [key], cached like [fromEncoded].
      * A still image is a legitimate one-frame animation, so this works for any format Skia reads.
      *
      * Unlike [fromEncoded] the decode is not deferred — reading the frame table is what tells the
      * animation how long it is — so hand it bytes you already have.
      */
     fun animated(key: String, bytes: ByteArray): SkijaAnimation = animationCache.getOrPut(key) {
+        // Skia reads an APNG as a still, so that one format is split and composited ourselves.
+        SkijaAnimation(ApngFrames.of(bytes) ?: CodecFrames(codec(key, bytes)))
+    }
+
+    private fun codec(key: String, bytes: ByteArray): Codec {
         val data = Data.makeFromBytes(bytes)
         val codec = try {
             Codec.makeFromData(data)
@@ -78,7 +83,7 @@ object SkijaImages {
         }
         // The codec holds its own reference to the bytes; ours has done its job.
         data.close()
-        SkijaAnimation(codec)
+        return codec
     }
 
     /** Drops a cached [resource], [fromEncoded] or [animated] entry and frees it after the frame. */

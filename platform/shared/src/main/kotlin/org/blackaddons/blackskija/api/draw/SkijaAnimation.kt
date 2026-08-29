@@ -1,18 +1,18 @@
 package org.blackaddons.blackskija.api.draw
 
 import io.github.humbleui.skija.Bitmap
-import io.github.humbleui.skija.Codec
 import io.github.humbleui.skija.Image
 import org.blackaddons.blackskija.api.DeferredFree
 import org.blackaddons.blackskija.api.RenderThread
 import org.blackaddons.blackskija.api.Skija
 
 /**
- * An animated picture — a GIF, an animated WebP — as a frame you can draw at any point in time.
+ * An animated picture — a GIF, an animated WebP, an APNG — as a frame you can draw at any point in
+ * time.
  *
- * Skia decodes one frame at a time, and a frame is usually a *delta* on the one before it, so the
- * frames are decoded on demand and only ever forward from what is already in hand: playing at speed
- * costs one decode per frame shown, and nothing is decoded for an animation nobody is looking at.
+ * A frame is decoded one at a time, and is usually a *delta* on the one before it, so the frames are
+ * decoded on demand and only ever forward from what is already in hand: playing at speed costs one
+ * decode per frame shown, and nothing is decoded for an animation nobody is looking at.
  * Decoding all of them up front would be simpler and would hold width × height × 4 bytes per frame
  * for as long as the picture existed.
  *
@@ -23,15 +23,13 @@ import org.blackaddons.blackskija.api.Skija
  * Render-thread only, like everything that touches a native handle here. [SkijaImages.animated] is
  * how you get one, and it owns it — say [SkijaImages.delete] rather than closing it yourself.
  */
-class SkijaAnimation internal constructor(private val codec: Codec) : AutoCloseable {
-
-    private val frames = codec.framesInfo
+class SkijaAnimation internal constructor(private val frames: AnimationFrames) : AutoCloseable {
 
     /** Frames in the picture. 1 for a still, which is a legitimate one-frame animation. */
-    val frameCount: Int = frames.size.coerceAtLeast(1)
+    val frameCount: Int = frames.count.coerceAtLeast(1)
 
-    val width: Int = codec.imageInfo.width
-    val height: Int = codec.imageInfo.height
+    val width: Int = frames.info.width
+    val height: Int = frames.info.height
 
     // Cumulative end time of each frame, so a lookup is a scan of one small array.
     private val ends = IntArray(frameCount)
@@ -40,7 +38,7 @@ class SkijaAnimation internal constructor(private val codec: Codec) : AutoClosea
     val durationMs: Int
 
     /** How many times the picture asks to repeat after its first pass; -1 means forever. */
-    val repetitions: Int = codec.repetitionCount
+    val repetitions: Int = frames.repetitions
 
     init {
         var total = 0
@@ -94,7 +92,7 @@ class SkijaAnimation internal constructor(private val codec: Codec) : AutoClosea
     }
 
     private fun pixels(): Bitmap =
-        bitmap ?: Bitmap().apply { allocPixels(codec.imageInfo) }.also { bitmap = it }
+        bitmap ?: Bitmap().apply { allocPixels(frames.info) }.also { bitmap = it }
 
     // Decodes forward to `target`, replaying only the frames it depends on and that we don't hold.
     private fun decode(target: Int): Boolean {
@@ -102,7 +100,7 @@ class SkijaAnimation internal constructor(private val codec: Codec) : AutoClosea
         var at = target
         while (at != decoded) {
             chain += at
-            val required = frames.getOrNull(at)?.requiredFrame ?: -1
+            val required = frames.requiredFrame(at)
             if (required < 0) break
             at = required
         }
@@ -110,7 +108,7 @@ class SkijaAnimation internal constructor(private val codec: Codec) : AutoClosea
         var prior = if (at == decoded) decoded else -1
         for (i in chain.indices.reversed()) {
             val frame = chain[i]
-            val ok = runCatching { codec.readPixels(pixels(), frame, prior) }.isSuccess
+            val ok = runCatching { frames.readInto(pixels(), frame, prior) }.isSuccess
             if (!ok) {
                 // The bitmap now holds something we can't name; force the next attempt to start over.
                 decoded = -1
@@ -125,7 +123,7 @@ class SkijaAnimation internal constructor(private val codec: Codec) : AutoClosea
     // A GIF authored with no delay means "as fast as sensible", which every renderer reads as 100ms.
     // Taken literally it plays at the frame rate of the game and looks like a strobe.
     private fun frameDuration(index: Int): Int {
-        val duration = frames.getOrNull(index)?.duration ?: DEFAULT_FRAME_MS
+        val duration = frames.durationMs(index)
         return if (duration <= MIN_FRAME_MS) DEFAULT_FRAME_MS else duration
     }
 
@@ -142,7 +140,7 @@ class SkijaAnimation internal constructor(private val codec: Codec) : AutoClosea
         current = null
         bitmap?.let { DeferredFree.later(it) }
         bitmap = null
-        DeferredFree.later(codec)
+        DeferredFree.later(frames)
     }
 
     private companion object {
