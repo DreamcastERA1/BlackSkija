@@ -69,6 +69,9 @@ object Skija {
     // Blur masks reused across frames, keyed by sigma. Never closed; they live for the process.
     private val blurMaskCache = HashMap<Float, MaskFilter>()
 
+    // A full logical pixel becomes visibly detached when a HUD is scaled up.
+    private const val TEXT_SHADOW_OFFSET = 0.5f
+
     internal fun hasContent(): Boolean = batch.isNotEmpty()
 
     /** How many ops are queued so far this frame — the compositor's split point between layers. */
@@ -407,13 +410,13 @@ object Skija {
         if (corner <= 0f) return Path.makePolygon(vertices(points), true)
 
         val vertices = vertices(points)
+        val winding = winding(vertices)
         val corners = Array(vertices.size) { index ->
-            roundedCorner(
-                vertices[(index - 1 + vertices.size) % vertices.size],
-                vertices[index],
-                vertices[(index + 1) % vertices.size],
-                corner,
-            )
+            val previous = vertices[(index - 1 + vertices.size) % vertices.size]
+            val vertex = vertices[index]
+            val next = vertices[(index + 1) % vertices.size]
+            if (isConvex(previous, vertex, next, winding)) roundedCorner(previous, vertex, next, corner)
+            else RoundedCorner(vertex, 0f)
         }
         return PathBuilder().use { builder ->
             // closePath only joins the last edge to this point; start at the first arc's tangent
@@ -452,6 +455,24 @@ object Skija {
             Point(vertex.x + incomingX / incomingLength * distance, vertex.y + incomingY / incomingLength * distance),
             radius,
         )
+    }
+
+    private fun winding(vertices: Array<Point>): Float {
+        var area = 0f
+        for (index in vertices.indices) {
+            val current = vertices[index]
+            val next = vertices[(index + 1) % vertices.size]
+            area += current.x * next.y - current.y * next.x
+        }
+        return area
+    }
+
+    private fun isConvex(previous: Point, vertex: Point, next: Point, winding: Float): Boolean {
+        val incomingX = vertex.x - previous.x
+        val incomingY = vertex.y - previous.y
+        val outgoingX = next.x - vertex.x
+        val outgoingY = next.y - vertex.y
+        return (incomingX * outgoingY - incomingY * outgoingX) * winding > 0f
     }
 
     /**
@@ -563,10 +584,10 @@ object Skija {
         TextLayoutCache.drawSolid(it, text, size.toFloat(), family, Float.POSITIVE_INFINITY, 1f, argb(color), activeAntiAlias, x.toFloat(), y.toFloat())
     }
 
-    /** [text] with a 1px-offset dark drop shadow underneath. */
+    /** [text] with a close dark drop shadow underneath. */
     fun textShadow(text: String, x: Number, y: Number, size: Number, color: Color, family: String = SkijaFonts.DEFAULT) = draw {
         val fx = x.toFloat(); val fy = y.toFloat(); val fs = size.toFloat()
-        TextLayoutCache.drawSolid(it, text, fs, family, Float.POSITIVE_INFINITY, 1f, argb(Color(0, 0, 0, color.alpha)), activeAntiAlias, fx + 1f, fy + 1f)
+        TextLayoutCache.drawSolid(it, text, fs, family, Float.POSITIVE_INFINITY, 1f, argb(Color(0, 0, 0, color.alpha)), activeAntiAlias, fx + TEXT_SHADOW_OFFSET, fy + TEXT_SHADOW_OFFSET)
         TextLayoutCache.drawSolid(it, text, fs, family, Float.POSITIVE_INFINITY, 1f, argb(color), activeAntiAlias, fx, fy)
     }
 
