@@ -23,10 +23,23 @@ internal object DeferredFree {
         pending += handle
     }
 
-    /** Frees everything parked since the last call. Compositor-only: see the note above on timing. */
+    /**
+     * Frees everything parked since the last call. Compositor-only: see the note above on timing.
+     *
+     * Indexed rather than iterated, because closing a handle can park more of them: an animation
+     * owns a codec, a bitmap and its current frame, and hands all three to [later] as it closes.
+     * Iterating threw `ConcurrentModificationException` the moment one was dropped, which a still
+     * picture does routinely — the probe that asks how many frames it has is an animation too.
+     * Anything parked mid-drain is as safe to free as the rest: the frame that could have recorded
+     * it has already been flushed, which is the whole precondition for calling this.
+     */
     fun release() {
         if (pending.isEmpty()) return
-        for (handle in pending) runCatching { handle.close() }
+        var i = 0
+        while (i < pending.size) {
+            runCatching { pending[i].close() }
+            i++
+        }
         pending.clear()
     }
 }

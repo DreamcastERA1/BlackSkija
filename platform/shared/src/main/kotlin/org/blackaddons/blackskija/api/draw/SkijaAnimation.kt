@@ -51,7 +51,11 @@ class SkijaAnimation internal constructor(private val codec: Codec) : AutoClosea
         durationMs = total
     }
 
-    private val bitmap = Bitmap().apply { allocPixels(codec.imageInfo) }
+    // Allocated on the first decode, not with the object: callers build one of these just to read
+    // [frameCount] and drop it again when the answer is 1, and a full-size bitmap is the one
+    // expensive thing here. A still the size of a screenshot would allocate and free megabytes to
+    // answer a question about its header.
+    private var bitmap: Bitmap? = null
 
     // Frame currently held in `bitmap`, and the one `current` was made from. Separate because a
     // decode can fail halfway and leave the bitmap holding something other than what was asked for.
@@ -82,12 +86,15 @@ class SkijaAnimation internal constructor(private val codec: Codec) : AutoClosea
         if (!decode(target)) return current
         // The bitmap is mutable and about to be drawn on again, so this makes a copy rather than
         // sharing its pixels — which is what lets the previous frame stay valid until its last draw.
-        val image = Image.makeRasterFromBitmap(bitmap)
+        val image = Image.makeRasterFromBitmap(pixels())
         current?.let { DeferredFree.later(it) }
         current = image
         shownIndex = target
         return image
     }
+
+    private fun pixels(): Bitmap =
+        bitmap ?: Bitmap().apply { allocPixels(codec.imageInfo) }.also { bitmap = it }
 
     // Decodes forward to `target`, replaying only the frames it depends on and that we don't hold.
     private fun decode(target: Int): Boolean {
@@ -103,7 +110,7 @@ class SkijaAnimation internal constructor(private val codec: Codec) : AutoClosea
         var prior = if (at == decoded) decoded else -1
         for (i in chain.indices.reversed()) {
             val frame = chain[i]
-            val ok = runCatching { codec.readPixels(bitmap, frame, prior) }.isSuccess
+            val ok = runCatching { codec.readPixels(pixels(), frame, prior) }.isSuccess
             if (!ok) {
                 // The bitmap now holds something we can't name; force the next attempt to start over.
                 decoded = -1
@@ -133,7 +140,8 @@ class SkijaAnimation internal constructor(private val codec: Codec) : AutoClosea
         closed = true
         current?.let { DeferredFree.later(it) }
         current = null
-        DeferredFree.later(bitmap)
+        bitmap?.let { DeferredFree.later(it) }
+        bitmap = null
         DeferredFree.later(codec)
     }
 
