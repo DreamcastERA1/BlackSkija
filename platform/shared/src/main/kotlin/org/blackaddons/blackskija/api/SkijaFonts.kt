@@ -36,8 +36,14 @@ object SkijaFonts {
     fun register(family: String, resourcePath: String) {
         val bytes = SkijaFonts::class.java.getResourceAsStream(resourcePath)?.use { it.readBytes() }
             ?: error("BlackSkija: bundled font not found on classpath: $resourcePath")
-        val typeface: Typeface = FontMgr.getDefault().makeFromData(Data.makeFromBytes(bytes))
-            ?: error("BlackSkija: failed to decode font (corrupt or unsupported): $resourcePath")
+        register(family, bytes)
+    }
+
+    /** Registers encoded TTF/OTF bytes under [family]. */
+    fun register(family: String, bytes: ByteArray) {
+        val typeface: Typeface = Data.makeFromBytes(bytes).use { data ->
+            FontMgr.getDefault().makeFromData(data)
+        } ?: error("BlackSkija: failed to decode font (corrupt or unsupported)")
         register(family, typeface)
     }
 
