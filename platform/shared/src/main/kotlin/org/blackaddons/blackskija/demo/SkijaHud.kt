@@ -25,7 +25,7 @@ object SkijaHud {
         val x = 8f
         val y = 8f
         val w = 214f
-        val h = 104f
+        val h = 130f
 
         Skija.dropShadow(x, y, w, h, 18, 2, 10, Color(0, 0, 0, 130))
         Skija.rect(x, y, w, h, Color(18, 20, 28, 210), 10)
@@ -60,6 +60,14 @@ object SkijaHud {
             listOf(Color(30, 44, 92), hue(t * 0.5), Color(30, 44, 92)),
             Gradient.LEFT_RIGHT, 7, floatArrayOf(0f, sweep, 1f),
         )
+
+        // Hinting specimen, at the sizes the UI actually draws. Round glyphs beside a straight one:
+        // a hard ledge under the o/e/g is grid fitting, while the L is flat-bottomed by design and so
+        // reads the same either way. Compare against a magnified screenshot, not with the naked eye.
+        val specY = y + 102f
+        SkijaText.draw("oeg L", x + 12, specY + 5, Color(210, 215, 230), 9f)
+        SkijaText.draw("oeg L", x + 58, specY + 3, Color(210, 215, 230), 12f)
+        SkijaText.draw("oeg L", x + 122, specY, Color(210, 215, 230), 16f)
     }
 
     // Color cycling through the hue wheel by tSeconds (1s = one full loop).

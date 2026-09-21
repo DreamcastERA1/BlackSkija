@@ -28,20 +28,67 @@ object SkijaItems {
         Collections.newSetFromMap(IdentityHashMap())
     private val requestedThisFrame = HashSet<Any>()
 
+    /**
+     * How many atlas pixels an item gets per screen pixel it is drawn at. The atlas slot follows the
+     * largest item on screen, in real device pixels, so this holds at any resolution or GUI Scale.
+     *
+     * 2 by default: Minecraft renders items without antialiasing, and a 2x slot shrunk back down is
+     * what smooths a head's edges. Going higher is not sharper — the atlas texture has no mipmaps,
+     * so shrinking by more than ~2.5x starts skipping pixels instead of averaging them.
+     */
     @Volatile
-    var supersample: Float = 1f
+    var supersample: Float = 2f
 
-    // Largest item draw this frame (logical px, max of w/h); drives the adaptive atlas slot size.
-    private var maxItemPx = 0f
+    // Largest item drawn this frame, in device pixels — after the GUI Scale and any transform the
+    // caller applied. In canvas units a mod that scales its own panels never reached the slot size,
+    // so a 4K screen stretched items out of a slot half their size.
+    private var maxItemDevicePx = 0f
+
+    // Frames in a row that asked for a smaller slot than the atlas was built with.
+    private var shrinkingFrames = 0
+
+    // A slot this big already holds a 256px item at the default supersample, and the atlas is one
+    // texture: past this, a screen full of items runs out of room and Minecraft skips some.
+    private const val MAX_SLOT_PX = 512
+
+    // Growing is urgent, shrinking only saves memory — and a size that wobbles (a screen opening and
+    // closing, a hover zoom) would otherwise rebuild the atlas every time it crossed a step.
+    private const val SHRINK_AFTER_FRAMES = 120
 
     internal fun beginFrame(state: GuiRenderState) {
         renderState = state
         ourStates.clear()
         requestedThisFrame.clear()
-        maxItemPx = 0f
+        maxItemDevicePx = 0f
     }
 
-    fun atlasSlotScale(): Int = max(1, ceil(maxItemPx * supersample / 16f).toInt())
+    /**
+     * The atlas slot size to render this frame's items at, given vanilla's own [vanillaSlot]
+     * (16 x GUI Scale). Called from `GuiRendererMixin`; public only because Java has to reach it.
+     *
+     * Always a whole multiple of [vanillaSlot]: vanilla items come out of the same atlas and are
+     * blitted with nearest, which is lossless only at a whole-number shrink.
+     */
+    fun slotTextureSize(vanillaSlot: Int): Int {
+        val wanted = ceil(maxItemDevicePx * supersample / vanillaSlot).toInt()
+        val ceiling = max(1, MAX_SLOT_PX / vanillaSlot)
+        return vanillaSlot * wanted.coerceIn(1, ceiling)
+    }
+
+    /**
+     * Whether an atlas built at [builtSlot] has to go for one at [wantedSlot]. Minecraft reuses an
+     * atlas while it has room and ignores the size it is handed, so without this a new size would
+     * only take effect by accident. Public for the same reason as [slotTextureSize].
+     */
+    fun shouldRebuildAtlas(builtSlot: Int, wantedSlot: Int): Boolean {
+        if (wantedSlot >= builtSlot) {
+            shrinkingFrames = 0
+            return wantedSlot > builtSlot
+        }
+        if (++shrinkingFrames < SHRINK_AFTER_FRAMES) return false
+        shrinkingFrames = 0
+        return true
+    }
 
     internal fun endFrame() {
         renderState = null
@@ -70,7 +117,7 @@ object SkijaItems {
         canvas: Canvas, stack: ItemStack, x: Number, y: Number, w: Number, h: Number, radius: Number, tint: Color?,
     ) {
         val rs = renderState ?: return
-        maxItemPx = max(maxItemPx, max(w.toFloat(), h.toFloat()))
+        maxItemDevicePx = max(maxItemDevicePx, max(w.toFloat(), h.toFloat()) * Skija.deviceScale(canvas))
         val mc = Minecraft.getInstance()
 
         val state = TrackingItemStackRenderState()

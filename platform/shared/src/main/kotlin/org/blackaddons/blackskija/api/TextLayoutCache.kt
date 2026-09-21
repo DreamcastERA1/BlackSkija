@@ -89,7 +89,8 @@ internal object TextLayoutCache {
     }
 
     fun measureWidth(text: String, size: Float, family: String): Float =
-        entry(text, size, family, Float.POSITIVE_INFINITY, 1f).paragraph.maxIntrinsicWidth
+        if (TextLineCache.covers(text, family)) TextLineCache.width(text, size, family)
+        else entry(text, size, family, Float.POSITIVE_INFINITY, 1f).paragraph.maxIntrinsicWidth
 
     fun measureHeight(text: String, size: Float, family: String, width: Float, lineHeight: Float): Float =
         entry(text, size, family, width, lineHeight).paragraph.height
@@ -104,6 +105,10 @@ internal object TextLayoutCache {
         canvas: Canvas, text: String, size: Float, family: String,
         width: Float, lineHeight: Float, argb: Int, antiAlias: Boolean, x: Float, y: Float,
     ) {
+        if (drawableAsLine(text, family, width, lineHeight)) {
+            TextLineCache.drawSolid(canvas, text, size, family, argb, antiAlias, x, y)
+            return
+        }
         val e = entry(text, size, family, width, lineHeight)
         // Skija 0.143.17: updateForegroundPaint only takes effect during layout(), so recoloring needs
         // updateForegroundPaint then layout() before paint. Skipped when the color is unchanged.
@@ -138,6 +143,10 @@ internal object TextLayoutCache {
         canvas: Canvas, text: String, size: Float, family: String,
         width: Float, lineHeight: Float, fg: Paint, x: Float, y: Float,
     ) {
+        if (drawableAsLine(text, family, width, lineHeight)) {
+            TextLineCache.drawShader(canvas, text, size, family, fg, x, y)
+            return
+        }
         val e = entry(text, size, family, width, lineHeight)
         // A shader paint always re-styles, so once this frame has recorded the cached paragraph the
         // only safe option is a throwaway — see the same guard in drawSolid.
@@ -166,6 +175,11 @@ internal object TextLayoutCache {
         evicted += p
         return p
     }
+
+    // Unwrapped text at natural leading has no layout to speak of, so a covered string can be shaped
+    // and drawn directly — which is the only way to control hinting. See [TextLineCache].
+    private fun drawableAsLine(text: String, family: String, width: Float, lineHeight: Float): Boolean =
+        width == Float.POSITIVE_INFINITY && lineHeight == 1f && TextLineCache.covers(text, family)
 
     // Cached laid-out entry for this content+style+width, built on a miss. Owned by the cache; never close it.
     private fun entry(text: String, size: Float, family: String, width: Float, lineHeight: Float): Entry {

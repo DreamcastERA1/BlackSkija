@@ -21,7 +21,10 @@ import org.blackaddons.blackskija.api.Skija
  * that would rather stop.
  *
  * Render-thread only, like everything that touches a native handle here. [SkijaImages.animated] is
- * how you get one, and it owns it — say [SkijaImages.delete] rather than closing it yourself.
+ * how you get one, and the handle stays playable for as long as you hold it: the cache behind it
+ * never frees an animation to make room, because a playhead and a decoded frame belong to whoever is
+ * drawing them. Say [SkijaImages.delete] to end one at a moment of your choosing; otherwise let go
+ * of it and it is collected.
  */
 class SkijaAnimation internal constructor(private val frames: AnimationFrames) : AutoCloseable {
 
@@ -61,6 +64,9 @@ class SkijaAnimation internal constructor(private val frames: AnimationFrames) :
     private var shownIndex = -1
     private var current: Image? = null
     private var closed = false
+
+    // A handed-out handle can be closed by its holder, so the cache asks before serving one again.
+    internal val isOpen: Boolean get() = !closed
 
     /** Which frame is showing at [elapsedMs] since the animation started. */
     fun frameIndexAt(elapsedMs: Long): Int {

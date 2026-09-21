@@ -21,6 +21,7 @@ import org.slf4j.LoggerFactory
 import java.awt.Color
 import kotlin.math.PI
 import kotlin.math.acos
+import kotlin.math.hypot
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
 import kotlin.math.tan
@@ -510,25 +511,41 @@ object Skija {
         drawImage(it, image, src, x.toFloat(), y.toFloat(), w.toFloat(), h.toFloat(), radius.toFloat(), tint)
     }
 
-    /**
-     * How to resample an image being drawn from [src] into [dst].
-     *
-     * Nearest ([SamplingMode.DEFAULT]) is right for Minecraft's art when it is drawn at or above its
-     * own resolution — it keeps a pixel a pixel. But it is wrong when the image has to *shrink*: it
-     * simply drops the pixels that don't land on an output one, so edges come out chewed. That case
-     * is not rare — an item comes off a supersampled atlas whose slot size is driven by the largest
-     * item on screen, so a small icon beside a large one is always a downscale.
-     *
-     * A cubic resampler handles it by averaging a neighborhood, and needs no mipmaps — which is the
-     * point: these images wrap GPU textures that have none, so a mipmapped filter would be ignored.
-     */
-    private fun sampling(src: Rect, dst: Rect): SamplingMode {
-        val shrinking = src.width > dst.width * DOWNSCALE_SLACK || src.height > dst.height * DOWNSCALE_SLACK
-        return if (shrinking) SamplingMode.MITCHELL else SamplingMode.DEFAULT
+    // How to resample an image drawn from `src` into `dst`, decided by how much it shrinks ON THE
+    // DEVICE. Measured in canvas units it is wrong by the whole transform — at least the GUI Scale the
+    // compositor concats — so an image landing 1:1 on screen read as a 2x downscale and got a cubic,
+    // which blurs even at 1:1 (Mitchell is not interpolating: 2.75 mean error on pixel art where
+    // nearest and linear are exact).
+    //
+    // Nearest keeps Minecraft's art crisp at or above its own resolution. Shrinking, bilinear up to
+    // 2.5x beat Mitchell on every content measured (pixel art, a logo, a photo-like field, a 1px
+    // checker) — at 2x it is an exact box filter. Past that it skips source pixels outright, and the
+    // cubic's wider reach aliases less (the checker at 3x: 63 against 113). No mipmaps either way:
+    // these images wrap GPU textures that have none.
+    private fun sampling(canvas: Canvas, src: Rect, dst: Rect): SamplingMode {
+        val (scaleX, scaleY) = deviceScales(canvas)
+        val shrink = maxOf(src.width / (dst.width * scaleX), src.height / (dst.height * scaleY))
+        return when {
+            shrink <= DOWNSCALE_SLACK -> SamplingMode.DEFAULT
+            shrink <= LINEAR_MAX_SHRINK -> SamplingMode.LINEAR
+            else -> SamplingMode.MITCHELL
+        }
     }
 
     /** Ignore a hair of shrinkage (rounding, a half-pixel layout) — that isn't a real downscale. */
     private const val DOWNSCALE_SLACK = 1.05f
+
+    private const val LINEAR_MAX_SHRINK = 2.5f
+
+    // Device pixels per canvas unit along each axis: the length of the transformed unit vectors, so a
+    // rotation does not read as a shrink.
+    private fun deviceScales(canvas: Canvas): Pair<Float, Float> {
+        val m = canvas.localToDeviceAsMatrix33.mat
+        return hypot(m[0], m[3]) to hypot(m[1], m[4])
+    }
+
+    /** Device pixels per canvas unit at this point of the replay; the larger axis if they differ. */
+    internal fun deviceScale(canvas: Canvas): Float = deviceScales(canvas).let { (x, y) -> maxOf(x, y) }
 
     private fun drawImage(
         canvas: Canvas, image: Image, src: Rect?, x: Float, y: Float, w: Float, h: Float, radius: Float, tint: Color?,
@@ -545,7 +562,7 @@ object Skija {
             canvas.save()
             canvas.clipRRect(RRect.makeXYWH(x, y, w, h, radius), activeAntiAlias)
         }
-        canvas.drawImageRect(image, srcRect, dstRect, sampling(srcRect, dstRect), imgPaint, true)
+        canvas.drawImageRect(image, srcRect, dstRect, sampling(canvas, srcRect, dstRect), imgPaint, true)
         if (rounded) canvas.restore()
         imgPaint.colorFilter = null
         tintFilter?.close()

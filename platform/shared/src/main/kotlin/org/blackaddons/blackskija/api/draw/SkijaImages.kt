@@ -15,6 +15,7 @@ import org.blackaddons.blackskija.api.draw.SkijaImages.drawMcSprite
 import org.blackaddons.blackskija.api.draw.SkijaImages.fromEncoded
 import org.blackaddons.blackskija.api.draw.SkijaImages.resource
 import java.awt.Color
+import java.lang.ref.WeakReference
 
 /**
  * Image sources for the [Skija] draw layer:
@@ -37,12 +38,21 @@ object SkijaImages {
         }
     }
 
+    // The animations in play. Falling out of here frees nothing — an animation is stateful, so the
+    // caller that kept the handle owns it just as much as this cache does, and closing on eviction
+    // blanked pictures that were still on screen: hold 17 distinct GIFs and the first one died mid-
+    // play. A demoted animation moves to [cooledAnimations] and keeps running for whoever holds it.
     private val animationCache = object : LinkedHashMap<String, SkijaAnimation>(8, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, SkijaAnimation>): Boolean {
-            if (size > ANIMATION_CACHE_MAX) { DeferredFree.later(eldest.value); return true }
-            return false
+            if (size <= ANIMATION_CACHE_MAX) return false
+            cooledAnimations[eldest.key] = WeakReference(eldest.value)
+            return true
         }
     }
+
+    // Animations this cache no longer holds open. Whoever still has the handle keeps playing, and one
+    // nobody holds is collected — Skija frees its natives from the cleaner, all of them CPU-side.
+    private val cooledAnimations = HashMap<String, WeakReference<SkijaAnimation>>()
 
     /** Decodes a classpath PNG/JPG into a cached Skija [Image] (e.g. `/assets/.../x.png`). */
     fun resource(path: String): Image = resourceCache.getOrPut(path) {
@@ -65,12 +75,25 @@ object SkijaImages {
      * Decodes an animated picture (GIF, animated WebP, APNG) under [key], cached like [fromEncoded].
      * A still image is a legitimate one-frame animation, so this works for any format Skia reads.
      *
+     * The same [key] gives back the same animation, playing where it already is, for as long as
+     * anyone holds it — keep the handle or ask again each frame, whichever suits. [delete] is the
+     * way to be rid of one at a chosen moment; otherwise dropping every reference is enough.
+     *
      * Unlike [fromEncoded] the decode is not deferred — reading the frame table is what tells the
      * animation how long it is — so hand it bytes you already have.
      */
-    fun animated(key: String, bytes: ByteArray): SkijaAnimation = animationCache.getOrPut(key) {
+    fun animated(key: String, bytes: ByteArray): SkijaAnimation {
+        animationCache[key]?.let { if (it.isOpen) return it }
+        cooledAnimations.remove(key)?.get()?.let {
+            if (it.isOpen) {
+                animationCache[key] = it
+                return it
+            }
+        }
+        cooledAnimations.entries.removeIf { it.value.get() == null }
         // Skia reads an APNG as a still, so that one format is split and composited ourselves.
-        SkijaAnimation(ApngFrames.of(bytes) ?: CodecFrames(codec(key, bytes)))
+        return SkijaAnimation(ApngFrames.of(bytes) ?: CodecFrames(codec(key, bytes)))
+            .also { animationCache[key] = it }
     }
 
     private fun codec(key: String, bytes: ByteArray): Codec {
@@ -86,10 +109,16 @@ object SkijaImages {
         return codec
     }
 
-    /** Drops a cached [resource], [fromEncoded] or [animated] entry and frees it after the frame. */
+    /**
+     * Drops a cached [resource], [fromEncoded] or [animated] entry and frees it after the frame.
+     *
+     * This is the one thing that ends an animation while a caller may still be holding it, so say it
+     * only about a picture you know is finished with.
+     */
     fun delete(path: String) {
         resourceCache.remove(path)?.let { DeferredFree.later(it) }
         animationCache.remove(path)?.let { DeferredFree.later(it) }
+        cooledAnimations.remove(path)?.get()?.let { DeferredFree.later(it) }
     }
 
     /**

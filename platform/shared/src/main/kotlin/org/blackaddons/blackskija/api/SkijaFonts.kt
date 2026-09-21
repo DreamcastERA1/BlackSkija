@@ -17,6 +17,10 @@ object SkijaFonts {
 
     private val typefaces = HashMap<String, Typeface>()
 
+    // Bumped by every registration, so caches built on a face can tell it was replaced.
+    internal var generation = 0
+        private set
+
     /** The typeface registered under [family], or null if nothing was registered for it. */
     internal fun typeface(family: String): Typeface? {
         collection // force the default face to register
@@ -51,5 +55,6 @@ object SkijaFonts {
     fun register(family: String, typeface: Typeface) {
         provider.registerTypeface(typeface, family)
         typefaces[family] = typeface
+        generation++
     }
 }

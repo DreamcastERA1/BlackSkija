@@ -5,6 +5,7 @@
   "client": [
     "GuiEntityCaptureMixin",
     "GuiExtractMixin",
+    "GuiItemAtlasAccessor",
     "GuiItemCaptureMixin",
     "GuiRendererMixin"
   ],
