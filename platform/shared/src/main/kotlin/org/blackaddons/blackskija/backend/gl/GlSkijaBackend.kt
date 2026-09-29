@@ -11,6 +11,7 @@ import org.lwjgl.opengl.GL30C
 internal object GlSkijaBackend : SkijaBackend, GpuProfileBackend {
 
     private const val GL_RGBA8 = 0x8058
+    private const val SUBMIT_EVERY = 60
 
     override val displayName = "OpenGL"
     override val gpuProfiler by lazy { GlGpuProfiler() }
@@ -35,6 +36,22 @@ internal object GlSkijaBackend : SkijaBackend, GpuProfileBackend {
 
     // Skija's raw GL calls bypass MC's state cache; snapshot/restore so it stays truthful, else MC
     // renders the item atlas on Skija's leftover state (the GL dark-item bug).
+    /**
+     * On GL, Skia's submit is a glFlush plus a glGetError sweep, and with a threaded driver both make
+     * the render thread wait for the driver to drain everything queued so far: ~5% of the frame in a
+     * spark profile, and the reason any Skija content at all cost ~1 ms. Nothing needs it per frame -
+     * Skia and Minecraft share the context, so Minecraft's blit already runs after Skia's draws, and the
+     * buffer swap flushes. Skia's own bookkeeping behind it (finish callbacks) still gets a regular turn,
+     * every [SUBMIT_EVERY] flushes (a frame has one or two).
+     */
+    private var flushesSinceSubmit = 0
+
+    override fun submit() {
+        if (++flushesSinceSubmit < SUBMIT_EVERY) return
+        flushesSinceSubmit = 0
+        context.submit(false)
+    }
+
     override fun saveState() = GlStateGuard.save()
     override fun restoreState() = GlStateGuard.restore()
 

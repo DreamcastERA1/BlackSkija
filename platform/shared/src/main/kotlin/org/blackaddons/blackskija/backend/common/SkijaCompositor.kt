@@ -227,9 +227,11 @@ object SkijaCompositor {
                 cursor = range.end
             }
             if (cursor < to) Skija.flush(session, cursor, to)
-            // Submit async (no CPU stall), then order this write before MC's blit read of the same
-            // texture. Lets us blit the buffer drawn this frame with no submit semaphore (0.143.17 has none).
-            backend.context.flushAndSubmit(surface, false)
+            // Flush, hand to the GPU as often as the backend needs, then order this write before MC's blit
+            // read of the same texture. Lets us blit the buffer drawn this frame with no submit semaphore
+            // (0.143.17 has none).
+            backend.context.flush(surface)
+            backend.submit()
         } finally {
             Skija.endFlush(session)
         }

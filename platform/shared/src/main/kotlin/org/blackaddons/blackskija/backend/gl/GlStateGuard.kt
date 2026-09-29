@@ -68,6 +68,7 @@ internal object GlStateGuard {
     }
 
     fun save() {
+        if (MinecraftGlState.available) return
         sDrawFbo = GL11C.glGetInteger(GL30C.GL_DRAW_FRAMEBUFFER_BINDING)
         sReadFbo = GL11C.glGetInteger(GL30C.GL_READ_FRAMEBUFFER_BINDING)
         sProgram = GL11C.glGetInteger(GL20C.GL_CURRENT_PROGRAM)
@@ -115,6 +116,7 @@ internal object GlStateGuard {
     }
 
     fun restore() {
+        if (MinecraftGlState.available) return MinecraftGlState.restore()
         GL30C.glBindFramebuffer(GL30C.GL_DRAW_FRAMEBUFFER, sDrawFbo)
         GL30C.glBindFramebuffer(GL30C.GL_READ_FRAMEBUFFER, sReadFbo)
         GL20C.glUseProgram(sProgram)

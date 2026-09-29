@@ -8,3 +8,25 @@ accessible	field	com/mojang/blaze3d/systems/GpuDevice	backend	Lcom/mojang/blaze3
 # GlDevice (the GL GpuDeviceBackend impl) is package-private; SkijaBackend.active needs
 # it to detect GL vs Vulkan at runtime. (VulkanDevice is already public.)
 accessible	class	com/mojang/blaze3d/opengl/GlDevice
+
+# MinecraftGlState restores GL from Minecraft's own state cache instead of glGet*-ing it back (each
+# glGet* is a driver round trip). Same layout in 26.1.2 and 26.2; BLEND and COLOR_MASK differ, so
+# those two go through the per-version GlStateManagerAccessor instead.
+accessible	class	com/mojang/blaze3d/opengl/GlStateManager$BooleanState
+accessible	field	com/mojang/blaze3d/opengl/GlStateManager$BooleanState	enabled	Z
+accessible	class	com/mojang/blaze3d/opengl/GlStateManager$BlendState
+accessible	class	com/mojang/blaze3d/opengl/GlStateManager$DepthState
+accessible	class	com/mojang/blaze3d/opengl/GlStateManager$CullState
+accessible	class	com/mojang/blaze3d/opengl/GlStateManager$ScissorState
+accessible	class	com/mojang/blaze3d/opengl/GlStateManager$TextureState
+accessible	field	com/mojang/blaze3d/opengl/GlStateManager	DEPTH	Lcom/mojang/blaze3d/opengl/GlStateManager$DepthState;
+accessible	field	com/mojang/blaze3d/opengl/GlStateManager	CULL	Lcom/mojang/blaze3d/opengl/GlStateManager$CullState;
+accessible	field	com/mojang/blaze3d/opengl/GlStateManager	SCISSOR	Lcom/mojang/blaze3d/opengl/GlStateManager$ScissorState;
+accessible	field	com/mojang/blaze3d/opengl/GlStateManager	TEXTURES	[Lcom/mojang/blaze3d/opengl/GlStateManager$TextureState;
+accessible	field	com/mojang/blaze3d/opengl/GlStateManager	activeTexture	I
+accessible	field	com/mojang/blaze3d/opengl/GlStateManager	readFbo	I
+accessible	field	com/mojang/blaze3d/opengl/GlStateManager	writeFbo	I
+
+# Minecraft skips glUseProgram while lastProgram matches, so after Skija's program it must forget it.
+accessible	class	com/mojang/blaze3d/opengl/GlCommandEncoder
+accessible	field	com/mojang/blaze3d/opengl/GlCommandEncoder	lastProgram	Lcom/mojang/blaze3d/opengl/GlProgram;

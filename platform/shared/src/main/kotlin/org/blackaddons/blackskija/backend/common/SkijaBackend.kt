@@ -19,6 +19,11 @@ internal interface SkijaBackend {
     // frame (0 latency). Vulkan submits a pipeline barrier; GL is already ordered, so the no-op fits.
     fun orderWriteBeforeRead(view: GpuTextureView) {}
 
+    // Hands the frame's flushed work to the GPU. Vulkan needs it every frame for the blit to see it.
+    fun submit() {
+        context.submit(false)
+    }
+
     val flipBlitU: Boolean get() = false
     val flipBlitV: Boolean get() = false
 
