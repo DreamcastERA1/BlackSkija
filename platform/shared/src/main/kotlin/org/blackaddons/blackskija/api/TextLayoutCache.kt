@@ -4,7 +4,10 @@ import io.github.humbleui.skija.Canvas
 import io.github.humbleui.skija.Paint
 import io.github.humbleui.skija.paragraph.Paragraph
 import io.github.humbleui.skija.paragraph.ParagraphBuilder
+import io.github.humbleui.skija.paragraph.BaselineMode
 import io.github.humbleui.skija.paragraph.ParagraphStyle
+import io.github.humbleui.skija.paragraph.PlaceholderAlignment
+import io.github.humbleui.skija.paragraph.PlaceholderStyle
 import io.github.humbleui.skija.paragraph.TextStyle
 import org.blackaddons.blackskija.api.TextLayoutCache.Entry
 import org.blackaddons.blackskija.api.TextLayoutCache.evicted
@@ -18,6 +21,13 @@ internal object TextLayoutCache {
 
     private data class Key(
         val text: String, val size: Float, val family: String,
+        val width: Float, val lineHeight: Float,
+    )
+
+    // The shape of a rich paragraph: its text, and how big each picture's box is. Not the pictures
+    // themselves, so an animated one advancing a frame does not cost a layout.
+    private data class RichKey(
+        val shape: List<Any>, val size: Float, val family: String,
         val width: Float, val lineHeight: Float,
     )
 
@@ -50,6 +60,15 @@ internal object TextLayoutCache {
 
     private val cache = object : LinkedHashMap<Key, Entry>(64, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Key, Entry>): Boolean {
+            if (size <= MAX) return false
+            evicted += eldest.value.paragraph
+            return true
+        }
+    }
+
+    // Rich layouts live apart from plain ones but obey the same eviction rule: freed only after a flush.
+    private val richCache = object : LinkedHashMap<RichKey, Entry>(64, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<RichKey, Entry>): Boolean {
             if (size <= MAX) return false
             evicted += eldest.value.paragraph
             return true
@@ -135,6 +154,92 @@ internal object TextLayoutCache {
         }
         e.paragraph.paint(canvas, x, y)
         e.paintedFrame = frame
+    }
+
+    /**
+     * [runs] laid out as one paragraph and painted in [argb], each picture drawn into the box Skia kept
+     * for it. Recoloured the way [drawSolid] recolours, with the same guard against restyling a paragraph
+     * this frame already recorded.
+     */
+    fun drawRich(
+        canvas: Canvas, runs: List<RichRun>, size: Float, family: String,
+        width: Float, lineHeight: Float, argb: Int, antiAlias: Boolean, x: Float, y: Float,
+    ) {
+        val e = richEntry(runs, size, family, width, lineHeight)
+        val length = richLength(runs)
+        paint.reset()
+        paint.isAntiAlias = antiAlias
+        paint.color = argb
+
+        val paragraph = if (e.paintedFrame == frame && (!e.solid || e.lastArgb != argb)) {
+            buildRich(runs, size, family, lineHeight).also {
+                it.updateForegroundPaint(0, length, paint)
+                it.layout(width)
+                evicted += it
+            }
+        } else {
+            if (!e.solid || e.lastArgb != argb) {
+                e.paragraph.updateForegroundPaint(0, length, paint)
+                e.paragraph.layout(width)
+                e.lastArgb = argb
+                e.solid = true
+            }
+            e.paintedFrame = frame
+            e.paragraph
+        }
+
+        paragraph.paint(canvas, x, y)
+
+        val pictures = runs.filterIsInstance<RichRun.Picture>()
+        paragraph.rectsForPlaceholders.forEachIndexed { i, box ->
+            val picture = pictures.getOrNull(i) ?: return@forEachIndexed
+            val r = box.rect
+            Skija.drawImageDirect(
+                canvas, picture.image, picture.srcX, picture.srcY, picture.srcW, picture.srcH,
+                x + r.left, y + r.top, r.width, r.height, 0f, null,
+            )
+        }
+    }
+
+    /** `[longestLine, height]` of [runs] wrapped at [maxWidth]. */
+    fun measureRich(runs: List<RichRun>, maxWidth: Float, size: Float, family: String, lineHeight: Float): FloatArray {
+        val p = richEntry(runs, size, family, maxWidth, lineHeight).paragraph
+        return floatArrayOf(p.longestLine, p.height)
+    }
+
+    // Every placeholder takes one character of the paragraph's text, which the foreground range must cover.
+    private fun richLength(runs: List<RichRun>): Int =
+        runs.sumOf { if (it is RichRun.Text) it.text.length else 1 }
+
+    private fun richEntry(runs: List<RichRun>, size: Float, family: String, width: Float, lineHeight: Float): Entry {
+        RenderThread.require("rich text was measured or drawn")
+        val shape = runs.map { if (it is RichRun.Text) it.text else (it as RichRun.Picture).scale }
+        val key = RichKey(shape, size, family, width, lineHeight)
+        richCache[key]?.let { return it }
+        val p = buildRich(runs, size, family, lineHeight)
+        p.layout(width)
+        return Entry(p).also { richCache[key] = it }
+    }
+
+    private fun buildRich(runs: List<RichRun>, size: Float, family: String, lineHeight: Float): Paragraph {
+        val style = TextStyle().setFontSize(size).setFontFamilies(arrayOf(family))
+        if (lineHeight != 1f) style.setHeight(lineHeight)
+        val paraStyle = ParagraphStyle().setTextStyle(style)
+        val builder = ParagraphBuilder(paraStyle, SkijaFonts.collection)
+        for (run in runs) when (run) {
+            is RichRun.Text -> builder.addText(run.text)
+            is RichRun.Picture -> {
+                val side = size * run.scale
+                builder.addPlaceholder(
+                    PlaceholderStyle(side, side, PlaceholderAlignment.MIDDLE, BaselineMode.ALPHABETIC, 0f),
+                )
+            }
+        }
+        val p = builder.build()
+        builder.close()
+        paraStyle.close()
+        style.close()
+        return p
     }
 
     // Non-solid foreground (e.g., a gradient shader). Always recolors+relayouts, and marks the paragraph
