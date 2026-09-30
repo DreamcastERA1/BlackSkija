@@ -590,6 +590,25 @@ object Skija {
         TextLayoutCache.drawSolid(it, text, fs, family, Float.POSITIVE_INFINITY, 1f, argb(color), activeAntiAlias, fx, fy)
     }
 
+    /**
+     * Text with pictures in it - emoji - wrapped at [w] like [wrappedText]: each [RichRun.Picture] takes a
+     * box in the line and is drawn into it.
+     */
+    fun richText(
+        runs: List<RichRun>, x: Number, y: Number, w: Number, size: Number, color: Color,
+        family: String = SkijaFonts.DEFAULT, lineHeight: Number = 1f,
+    ) = draw {
+        TextLayoutCache.drawRich(
+            it, runs, size.toFloat(), family, w.toFloat(), lineHeight.toFloat(), argb(color), activeAntiAlias,
+            x.toFloat(), y.toFloat(),
+        )
+    }
+
+    /** `[width, height]` of [richText] at [w]. Render-thread only. */
+    fun richTextBounds(
+        runs: List<RichRun>, w: Number, size: Number, family: String = SkijaFonts.DEFAULT, lineHeight: Number = 1f,
+    ): FloatArray = TextLayoutCache.measureRich(runs, w.toFloat(), size.toFloat(), family, lineHeight.toFloat())
+
     /** Width of [text] at [size]. Render-thread only (builds/reuses a native paragraph). */
     fun textWidth(text: String, size: Number, family: String = SkijaFonts.DEFAULT): Float =
         TextLayoutCache.measureWidth(text, size.toFloat(), family)
