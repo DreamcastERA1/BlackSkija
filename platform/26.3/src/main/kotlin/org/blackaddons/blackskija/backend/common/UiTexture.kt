@@ -1,10 +1,10 @@
 package org.blackaddons.blackskija.backend.common
 
-import com.mojang.blaze3d.GpuFormat
+import com.mojang.renderpearl.api.GpuFormat
 import com.mojang.blaze3d.systems.RenderSystem
-import com.mojang.blaze3d.textures.GpuTexture
+import com.mojang.renderpearl.api.textures.GpuTexture
 
-// The colour-target format enum moved packages between versions (26.2 GpuFormat, earlier TextureFormat),
+// The colour-target format enum moved packages between versions (26.2+ GpuFormat, earlier TextureFormat),
 // so texture creation is the one device call that can't sit in shared code.
 internal object UiTexture {
     fun create(name: String, usage: Int, width: Int, height: Int): GpuTexture =

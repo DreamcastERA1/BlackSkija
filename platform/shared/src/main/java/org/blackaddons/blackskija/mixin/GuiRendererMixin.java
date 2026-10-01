@@ -10,8 +10,11 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
-import org.spongepowered.asm.mixin.injection.ModifyArg;
+import org.spongepowered.asm.mixin.injection.ModifyArgs;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import org.spongepowered.asm.mixin.injection.invoke.arg.Args;
+
+import java.util.Set;
 
 @Mixin(GuiRenderer.class)
 public class GuiRendererMixin {
@@ -36,20 +39,21 @@ public class GuiRendererMixin {
      * size: {@code prepareItemAtlas} keeps any atlas that still has room and ignores the size it is
      * passed, so without the rebuild a new slot size would only land when the atlas happened to fill.
      */
-    @ModifyArg(
+    @ModifyArgs(
         method = "prepareItemElements",
         at = @At(
             value = "INVOKE",
             target = "Lnet/minecraft/client/gui/render/GuiRenderer;prepareItemAtlas(Ljava/util/Set;I)Lnet/minecraft/client/gui/render/GuiItemAtlas;"
-        ),
-        index = 1
+        )
     )
-    private int blackskija$supersampleItemAtlas(int slotTextureSize) {
-        int wanted = SkijaItems.INSTANCE.slotTextureSize(slotTextureSize);
+    private void blackskija$supersampleItemAtlas(Args args) {
+        Set<?> items = args.get(0);
+        int wanted = SkijaItems.INSTANCE.slotTextureSize(args.<Integer>get(1));
         if (this.itemAtlas != null) {
             int built = ((GuiItemAtlasAccessor) this.itemAtlas).blackskija$slotTextureSize();
-            if (SkijaItems.INSTANCE.shouldRebuildAtlas(built, wanted)) this.invalidateItemAtlas();
+            int perSide = this.itemAtlas.textureSize() / built;
+            if (SkijaItems.INSTANCE.shouldRebuildAtlas(built, wanted, perSide * perSide, items.size())) this.invalidateItemAtlas();
         }
-        return wanted;
+        args.set(1, wanted);
     }
 }

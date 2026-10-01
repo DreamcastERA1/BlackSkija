@@ -22,7 +22,6 @@ import org.blackaddons.blackskija.backend.natives.SkijaNatives
 import org.blackaddons.blackskija.demo.SkijaDemo
 import org.blackaddons.blackskija.demo.SkijaDemoScreen
 import org.blackaddons.blackskija.demo.SkijaHud
-import org.lwjgl.glfw.GLFW
 
 class BlackskijaClient : ClientModInitializer {
 
@@ -62,13 +61,13 @@ class BlackskijaClient : ClientModInitializer {
         ) { _, _ -> SkijaHud.draw() }
 
         val toggleKey = KeyMappingHelper.registerKeyMapping(
-            KeyMapping("key.blackskija.toggle", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_F8, KeyMapping.Category.DEBUG),
+            KeyMapping("key.blackskija.toggle", InputConstants.KEY_F8, KeyMapping.Category.DEBUG),
         )
         val openScreenKey = KeyMappingHelper.registerKeyMapping(
-            KeyMapping("key.blackskija.open_screen", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_F9, KeyMapping.Category.DEBUG),
+            KeyMapping("key.blackskija.open_screen", InputConstants.KEY_F9, KeyMapping.Category.DEBUG),
         )
         val hudKey = KeyMappingHelper.registerKeyMapping(
-            KeyMapping("key.blackskija.toggle_hud", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_F6, KeyMapping.Category.DEBUG),
+            KeyMapping("key.blackskija.toggle_hud", InputConstants.KEY_F6, KeyMapping.Category.DEBUG),
         )
 
         ClientTickEvents.END_CLIENT_TICK.register {

@@ -1,7 +1,7 @@
 package org.blackaddons.blackskija.backend.gl
 
-import com.mojang.blaze3d.opengl.GlTextureView
-import com.mojang.blaze3d.textures.GpuTextureView
+import org.blackaddons.blackskija.compat.GlTextureView
+import org.blackaddons.blackskija.compat.GpuTextureView
 import io.github.humbleui.skija.*
 import org.blackaddons.blackskija.backend.common.GpuProfileBackend
 import org.blackaddons.blackskija.backend.common.SkijaBackend

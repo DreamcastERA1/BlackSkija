@@ -1,6 +1,6 @@
 package org.blackaddons.blackskija.api.draw
 
-import com.mojang.blaze3d.textures.GpuTextureView
+import org.blackaddons.blackskija.compat.GpuTextureView
 import io.github.humbleui.skija.Canvas
 import net.minecraft.client.renderer.state.gui.GuiRenderState
 import net.minecraft.client.renderer.state.gui.pip.GuiEntityRenderState

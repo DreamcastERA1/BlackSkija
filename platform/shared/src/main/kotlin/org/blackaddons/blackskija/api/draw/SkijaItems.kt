@@ -1,6 +1,6 @@
 package org.blackaddons.blackskija.api.draw
 
-import com.mojang.blaze3d.textures.GpuTextureView
+import org.blackaddons.blackskija.compat.GpuTextureView
 import io.github.humbleui.skija.Canvas
 import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.navigation.ScreenRectangle
@@ -79,13 +79,17 @@ object SkijaItems {
      * Whether an atlas built at [builtSlot] has to go for one at [wantedSlot]. Minecraft reuses an
      * atlas while it has room and ignores the size it is handed, so without this a new size would
      * only take effect by accident. Public for the same reason as [slotTextureSize].
+     *
+     * A shrink waits [SHRINK_AFTER_FRAMES] so a briefly smaller item doesn't thrash the atlas, but
+     * only while the big slots still hold all [itemCount] items: Minecraft recomputes the atlas size
+     * from the smaller slot, gets the size it already has, and skips items instead of growing it.
      */
-    fun shouldRebuildAtlas(builtSlot: Int, wantedSlot: Int): Boolean {
+    fun shouldRebuildAtlas(builtSlot: Int, wantedSlot: Int, builtCapacity: Int, itemCount: Int): Boolean {
         if (wantedSlot >= builtSlot) {
             shrinkingFrames = 0
             return wantedSlot > builtSlot
         }
-        if (++shrinkingFrames < SHRINK_AFTER_FRAMES) return false
+        if (itemCount <= builtCapacity && ++shrinkingFrames < SHRINK_AFTER_FRAMES) return false
         shrinkingFrames = 0
         return true
     }
