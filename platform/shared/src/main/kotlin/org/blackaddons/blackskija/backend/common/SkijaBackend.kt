@@ -1,6 +1,6 @@
 package org.blackaddons.blackskija.backend.common
 
-import com.mojang.blaze3d.textures.GpuTextureView
+import org.blackaddons.blackskija.compat.GpuTextureView
 import io.github.humbleui.skija.DirectContext
 import io.github.humbleui.skija.Image
 import io.github.humbleui.skija.Surface

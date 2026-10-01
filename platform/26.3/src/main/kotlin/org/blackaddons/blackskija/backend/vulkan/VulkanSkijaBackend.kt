@@ -1,11 +1,12 @@
 package org.blackaddons.blackskija.backend.vulkan
 
-import com.mojang.blaze3d.systems.GpuDevice
+import com.mojang.renderpearl.api.device.GpuDevice
 import com.mojang.blaze3d.systems.RenderSystem
-import com.mojang.blaze3d.textures.GpuTextureView
-import com.mojang.blaze3d.vulkan.VulkanConst
-import com.mojang.blaze3d.vulkan.VulkanDevice
-import com.mojang.blaze3d.vulkan.VulkanGpuTexture
+import com.mojang.renderpearl.api.textures.GpuTextureView
+import com.mojang.renderpearl.backend.vulkan.VulkanConst
+import com.mojang.renderpearl.backend.vulkan.VulkanDevice
+import com.mojang.renderpearl.backend.vulkan.VulkanGpuTexture
+import com.mojang.renderpearl.frontend.FrontendGpuDevice
 import io.github.humbleui.skija.*
 import org.blackaddons.blackskija.backend.common.GpuProfileBackend
 import org.blackaddons.blackskija.backend.common.GpuProfiler
@@ -125,5 +126,5 @@ internal object VulkanSkijaBackend : SkijaBackend, GpuProfileBackend {
     }
 
     private fun unwrapVulkanDevice(device: GpuDevice): VulkanDevice =
-        device.backend as VulkanDevice
+        (device as FrontendGpuDevice).backend as VulkanDevice
 }

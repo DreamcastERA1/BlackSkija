@@ -17,7 +17,7 @@ val skijaVersion = prop("skija_version")
 val typesVersion = prop("types_version")
 
 loom {
-    accessWidenerPath = rootProject.file("platform/shared/src/main/resources/blackskija.accesswidener")
+    accessWidenerPath = file("src/main/resources/blackskija.accesswidener")
 
     // 26.1.2 has only the GL backend, so no --graphicsBackend switch — just the dev showcase, which
     // BlackskijaClient gates to this project's own dev.

@@ -1,0 +1,32 @@
+accessWidener v2 official
+
+# GpuDevice wraps the real backend (VulkanDevice / GlDevice) in a private final
+# field; VulkanSkijaBackend needs it to build the Skija DirectContext. Widening the
+# field replaces fragile dev-only reflection and works under intermediary mappings.
+accessible	field	com/mojang/renderpearl/frontend/FrontendGpuDevice	backend	Lcom/mojang/renderpearl/backend/api/GpuDeviceBackend;
+
+# GlDevice (the GL GpuDeviceBackend impl) is package-private; SkijaBackend.active needs
+# it to detect GL vs Vulkan at runtime. (VulkanDevice is already public.)
+accessible	class	com/mojang/renderpearl/backend/opengl/GlDevice
+
+# MinecraftGlState restores GL from Minecraft's own state cache instead of glGet*-ing it back (each
+# glGet* is a driver round trip). BLEND and COLOR_MASK differ between versions, so
+# those two go through the per-version GlStateManagerAccessor instead.
+accessible	class	com/mojang/renderpearl/backend/opengl/GlStateManager$BooleanState
+accessible	field	com/mojang/renderpearl/backend/opengl/GlStateManager$BooleanState	enabled	Z
+accessible	class	com/mojang/renderpearl/backend/opengl/GlStateManager$BlendState
+accessible	class	com/mojang/renderpearl/backend/opengl/GlStateManager$DepthState
+accessible	class	com/mojang/renderpearl/backend/opengl/GlStateManager$CullState
+accessible	class	com/mojang/renderpearl/backend/opengl/GlStateManager$ScissorState
+accessible	class	com/mojang/renderpearl/backend/opengl/GlStateManager$TextureState
+accessible	field	com/mojang/renderpearl/backend/opengl/GlStateManager	DEPTH	Lcom/mojang/renderpearl/backend/opengl/GlStateManager$DepthState;
+accessible	field	com/mojang/renderpearl/backend/opengl/GlStateManager	CULL	Lcom/mojang/renderpearl/backend/opengl/GlStateManager$CullState;
+accessible	field	com/mojang/renderpearl/backend/opengl/GlStateManager	SCISSOR	Lcom/mojang/renderpearl/backend/opengl/GlStateManager$ScissorState;
+accessible	field	com/mojang/renderpearl/backend/opengl/GlStateManager	TEXTURES	[Lcom/mojang/renderpearl/backend/opengl/GlStateManager$TextureState;
+accessible	field	com/mojang/renderpearl/backend/opengl/GlStateManager	activeTexture	I
+accessible	field	com/mojang/renderpearl/backend/opengl/GlStateManager	readFbo	I
+accessible	field	com/mojang/renderpearl/backend/opengl/GlStateManager	writeFbo	I
+
+# Minecraft skips glUseProgram while lastProgram matches, so after Skija's program it must forget it.
+accessible	class	com/mojang/renderpearl/backend/opengl/GlCommandEncoder
+accessible	field	com/mojang/renderpearl/backend/opengl/GlCommandEncoder	lastProgram	Lcom/mojang/renderpearl/backend/opengl/GlProgram;

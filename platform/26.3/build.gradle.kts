@@ -1,4 +1,4 @@
-// :platform:26.2 — the Minecraft 26.2 build: Vulkan + GL backends, and the assembly of the jar.
+// :platform:26.3 — the Minecraft 26.3 build: Vulkan + GL backends, and the assembly of the jar.
 plugins {
     id("blackskija.platform")
     // Version pinned in settings.gradle.kts; applied here because a precompiled convention plugin
@@ -8,29 +8,33 @@ plugins {
 
 fun prop(name: String): String = providers.gradleProperty(name).get()
 
-// Everything version-specific about 26.2, in one place. The 26.1.2 sibling declares its own.
-val minecraftVersion = prop("mc262_minecraft_version")
-val loaderVersion = prop("mc262_loader_version")
-val fabricKotlinVersion = prop("mc262_fabric_kotlin_version")
-val fabricApiVersion = prop("mc262_fabric_api_version")
+// Everything version-specific about 26.3, in one place. The 26.1.2 sibling declares its own.
+val minecraftVersion = prop("mc263_minecraft_version")
+val loaderVersion = prop("mc263_loader_version")
+val fabricKotlinVersion = prop("mc263_fabric_kotlin_version")
+val fabricApiVersion = prop("mc263_fabric_api_version")
 val skijaVersion = prop("skija_version")
 val typesVersion = prop("types_version")
 
 loom {
-    accessWidenerPath = rootProject.file("platform/shared/src/main/resources/blackskija.accesswidener")
+    accessWidenerPath = file("src/main/resources/blackskija.accesswidener")
 
     // Portable client run configs that force the GPU backend via a launch arg. Both editions run the
     // dev showcase (blackskija.demo), which BlackskijaClient gates to this project's own dev only.
     runs {
+        // The plain run keeps the in-game backend setting; the two below force one.
+        named("client") {
+            systemProperties.put("blackskija.demo", "true")
+        }
         create("clientVulkan") {
             client()
-            displayName = "Minecraft Client (26.2 · Vulkan)"
+            displayName = "Minecraft Client (26.3 · Vulkan)"
             programArguments.addAll("--graphicsBackend", "vulkan")
             systemProperties.put("blackskija.demo", "true")
         }
         create("clientOpenGl") {
             client()
-            displayName = "Minecraft Client (26.2 · OpenGL)"
+            displayName = "Minecraft Client (26.3 · OpenGL)"
             programArguments.addAll("--graphicsBackend", "opengl")
             systemProperties.put("blackskija.demo", "true")
         }
@@ -38,7 +42,7 @@ loom {
 }
 
 dependencies {
-    // 26.2 ships deobfuscated → plain `minecraft(...)`/`implementation(...)`, no mappings/modImpl.
+    // 26.3 ships deobfuscated → plain `minecraft(...)`/`implementation(...)`, no mappings/modImpl.
     minecraft("com.mojang:minecraft:$minecraftVersion")
     implementation("net.fabricmc:fabric-loader:$loaderVersion")
     implementation("net.fabricmc.fabric-api:fabric-api:$fabricApiVersion")

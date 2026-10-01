@@ -26,7 +26,7 @@ so you get anti-aliased shapes, gradients, blur, drop shadows, and rich text wit
 - **Minecraft textures, resource-pack aware** — draw live MC textures, atlas sprites, and
   rendered `ItemStack`s by *borrowing* their GPU handle (no CPU copy). Reflects the active
   resource pack and item NBT/components.
-- **Vulkan *and* OpenGL** — on `26.2`, composites over `blaze3d` on either backend, with a
+- **Vulkan *and* OpenGL** — on `26.3`, composites over `blaze3d` on either backend, with a
   0-latency path on Vulkan; on `26.1.2` (which ships no Vulkan backend) it runs on OpenGL.
   Gracefully disables on a GPU API it can't adapt. Most Skija/NanoVG UI mods are GL-only.
 - **Immediate-mode** — call from any render-thread hook, no begin/end; an idle frame costs nothing.
@@ -39,12 +39,12 @@ so you get anti-aliased shapes, gradients, blur, drop shadows, and rich text wit
 BlackSkija builds for two Minecraft versions from one source tree — a shared core plus a thin
 per-version layer. Pick the artifact matching your target.
 
-|                        | `26.2`                    | `26.1.2`                  |
+|                        | `26.3`                    | `26.1.2`                  |
 |------------------------|---------------------------|---------------------------|
 | GPU backends           | Vulkan + OpenGL           | OpenGL                    |
-| Fabric API             | `0.152.2+26.2`            | `0.155.2+26.1.2`          |
-| Fabric Loader          | `>= 0.19.3`               | `>= 0.19.3`               |
-| Fabric Language Kotlin | `>= 1.13.12+kotlin.2.4.0` | `>= 1.13.12+kotlin.2.4.0` |
+| Fabric API             | `0.161.0+26.3`            | `0.155.2+26.1.2`          |
+| Fabric Loader          | `>= 0.19.5`               | `>= 0.19.5`               |
+| Fabric Language Kotlin | `>= 1.14.1+kotlin.2.4.20` | `>= 1.14.1+kotlin.2.4.20` |
 | Java                   | 25                        | 25                        |
 
 The Skija native library is **not** bundled in the jar — it is downloaded at runtime and
@@ -62,8 +62,8 @@ repositories {
 }
 
 dependencies {
-    // 26.2 (Vulkan + OpenGL)
-    implementation("com.github.DreamcastERA1.BlackSkija:blackskija-26.2:{version}")
+    // 26.3 (Vulkan + OpenGL)
+    implementation("com.github.DreamcastERA1.BlackSkija:blackskija-26.3:{version}")
     // …or 26.1.2 (OpenGL)
     // implementation("com.github.DreamcastERA1.BlackSkija:blackskija-26.1.2:{version}")
 }
@@ -159,18 +159,18 @@ empty cache leaves the overlay disabled until an online launch (never crashes).
 
 ## Building
 
-One Gradle build, one module per Minecraft version (`:platform:26.2`, `:platform:26.1.2`), both
+One Gradle build, one module per Minecraft version (`:platform:26.3`, `:platform:26.1.2`), both
 sharing `platform/shared`. 26.x ships deobfuscated, so the plain `jar` is the final artifact — no
 remap step.
 
 ```bash
 ./gradlew build                     # every platform → platform/<mc>/build/libs/
-./gradlew :platform:26.2:build      # just one platform
+./gradlew :platform:26.3:build      # just one platform
 ./gradlew publishToMavenLocal       # what JitPack runs
 
 # dev clients (each launches the built-in showcase)
-./gradlew :platform:26.2:runClientVulkan
-./gradlew :platform:26.2:runClientOpenGl
+./gradlew :platform:26.3:runClientVulkan
+./gradlew :platform:26.3:runClientOpenGl
 ./gradlew :platform:26.1.2:runClient
 ```
 

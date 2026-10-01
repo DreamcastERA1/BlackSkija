@@ -1,9 +1,9 @@
 package org.blackaddons.blackskija.backend.common
 
 import com.mojang.blaze3d.systems.RenderSystem
-import com.mojang.blaze3d.textures.FilterMode
-import com.mojang.blaze3d.textures.GpuTexture
-import com.mojang.blaze3d.textures.GpuTextureView
+import org.blackaddons.blackskija.compat.FilterMode
+import org.blackaddons.blackskija.compat.GpuTexture
+import org.blackaddons.blackskija.compat.GpuTextureView
 import io.github.humbleui.skija.Surface
 import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.render.TextureSetup

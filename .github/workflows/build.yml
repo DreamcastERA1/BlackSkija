@@ -41,7 +41,7 @@ jobs:
         with:
           name: blackskija-jars
           path: |
-            platform/26.2/build/libs/*.jar
+            platform/26.3/build/libs/*.jar
             platform/26.1.2/build/libs/*.jar
             !**/*-sources.jar
             !**/*-dev.jar
