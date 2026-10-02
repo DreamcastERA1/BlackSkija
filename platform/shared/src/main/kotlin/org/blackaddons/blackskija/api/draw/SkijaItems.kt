@@ -79,10 +79,6 @@ object SkijaItems {
      * Whether an atlas built at [builtSlot] has to go for one at [wantedSlot]. Minecraft reuses an
      * atlas while it has room and ignores the size it is handed, so without this a new size would
      * only take effect by accident. Public for the same reason as [slotTextureSize].
-     *
-     * A shrink waits [SHRINK_AFTER_FRAMES] so a briefly smaller item doesn't thrash the atlas, but
-     * only while the big slots still hold all [itemCount] items: Minecraft recomputes the atlas size
-     * from the smaller slot, gets the size it already has, and skips items instead of growing it.
      */
     fun shouldRebuildAtlas(builtSlot: Int, wantedSlot: Int, builtCapacity: Int, itemCount: Int): Boolean {
         if (wantedSlot >= builtSlot) {

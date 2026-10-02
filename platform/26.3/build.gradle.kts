@@ -22,7 +22,6 @@ loom {
     // Portable client run configs that force the GPU backend via a launch arg. Both editions run the
     // dev showcase (blackskija.demo), which BlackskijaClient gates to this project's own dev only.
     runs {
-        // The plain run keeps the in-game backend setting; the two below force one.
         named("client") {
             systemProperties.put("blackskija.demo", "true")
         }
