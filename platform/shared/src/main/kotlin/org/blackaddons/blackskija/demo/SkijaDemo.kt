@@ -36,6 +36,8 @@ object SkijaDemo {
 
     private val DEMO_ITEM by lazy { ItemStack(Items.DIAMOND_SWORD) }
 
+    internal fun panelHeight(screenHeight: Int): Float = (screenHeight * 0.78f).coerceIn(470f, 720f)
+
     fun draw() {
         val window = Minecraft.getInstance().window
         val sw = window.guiScaledWidth
@@ -43,7 +45,7 @@ object SkijaDemo {
         val t = (System.nanoTime() / 1_000_000L) / 1000.0
 
         val pw = (sw * 0.7f).coerceIn(460f, 820f)
-        val ph = (sh * 0.78f).coerceIn(470f, 720f)
+        val ph = panelHeight(sh)
         val px = (sw - pw) / 2f
         val py = (sh - ph) / 2f
 
