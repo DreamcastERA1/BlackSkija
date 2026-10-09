@@ -42,13 +42,39 @@ repositories {
 // The shared half of the library: one source tree, compiled against each platform's own mappings.
 // A source directory rather than a module because it references Minecraft — a binary module can only
 // bind one version's mappings, these files must bind both.
+// 26.3 relocated the GPU API to RenderPearl. Generate its shared sources so older platforms
+// retain their original imports and the API still has a single maintained source tree.
+val sharedSources = if (project.name == "26.3") {
+    val relocated = tasks.register<Sync>("relocateSharedSources") {
+        inputs.property("relocationVersion", 2)
+        from(rootProject.file("platform/shared/src/main"))
+        into(layout.buildDirectory.dir("generated/shared"))
+        filesMatching(listOf("**/*.kt", "**/*.java")) {
+            filter { line: String ->
+                line.replace("com.mojang.blaze3d.systems.GpuDevice", "com.mojang.renderpearl.api.device.GpuDevice")
+                    .replace("com.mojang.blaze3d.textures", "com.mojang.renderpearl.api.textures")
+                    .replace("com.mojang.blaze3d.opengl", "com.mojang.renderpearl.backend.opengl")
+                    .replace("com.mojang.blaze3d.GpuFormat", "com.mojang.renderpearl.api.GpuFormat")
+                    .replace("InputConstants.Type.KEYSYM", "InputConstants.Type.KEYBOARD")
+                    .replace("com/mojang/blaze3d/systems/GpuDevice", "com/mojang/renderpearl/api/device/GpuDevice")
+                    .replace("com/mojang/blaze3d/GpuFormat", "com/mojang/renderpearl/api/GpuFormat")
+                    .replace("com/mojang/blaze3d/textures/", "com/mojang/renderpearl/api/textures/")
+            }
+        }
+    }
+    tasks.withType<JavaCompile>().configureEach { dependsOn(relocated) }
+    tasks.withType<KotlinCompile>().configureEach { dependsOn(relocated) }
+    tasks.named("processResources") { dependsOn(relocated) }
+    tasks.named("sourcesJar") { dependsOn(relocated) }
+    layout.buildDirectory.dir("generated/shared").get().asFile
+} else rootProject.file("platform/shared/src/main")
 sourceSets.named("main") {
-    java.srcDir(rootProject.file("platform/shared/src/main/java"))
-    resources.srcDir(rootProject.file("platform/shared/src/main/resources"))
+    java.srcDir(sharedSources.resolve("java"))
+    resources.srcDir(sharedSources.resolve("resources"))
 }
 kotlin {
     sourceSets.named("main") {
-        kotlin.srcDir(rootProject.file("platform/shared/src/main/kotlin"))
+        kotlin.srcDir(sharedSources.resolve("kotlin"))
     }
 }
 

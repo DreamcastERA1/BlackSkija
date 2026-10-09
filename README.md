@@ -36,16 +36,16 @@ so you get anti-aliased shapes, gradients, blur, drop shadows, and rich text wit
 
 ## Requirements
 
-BlackSkija builds for two Minecraft versions from one source tree — a shared core plus a thin
+BlackSkija builds for three Minecraft versions from one source tree — a shared core plus a thin
 per-version layer. Pick the artifact matching your target.
 
-|                        | `26.2`                    | `26.1.2`                  |
-|------------------------|---------------------------|---------------------------|
-| GPU backends           | Vulkan + OpenGL           | OpenGL                    |
-| Fabric API             | `0.152.2+26.2`            | `0.155.2+26.1.2`          |
-| Fabric Loader          | `>= 0.19.3`               | `>= 0.19.3`               |
-| Fabric Language Kotlin | `>= 1.13.12+kotlin.2.4.0` | `>= 1.13.12+kotlin.2.4.0` |
-| Java                   | 25                        | 25                        |
+|                        | `26.3`                    | `26.2`                    | `26.1.2`                  |
+|------------------------|---------------------------|---------------------------|---------------------------|
+| GPU backends           | Vulkan + OpenGL           | Vulkan + OpenGL           | OpenGL                    |
+| Fabric API             | `0.162.0+26.3`             | `0.152.2+26.2`            | `0.155.2+26.1.2`          |
+| Fabric Loader          | `>= 0.19.5`               | `>= 0.19.3`               | `>= 0.19.3`               |
+| Fabric Language Kotlin | `>= 1.13.12+kotlin.2.4.0` | `>= 1.13.12+kotlin.2.4.0` | `>= 1.13.12+kotlin.2.4.0` |
+| Java                   | 25                        | 25                        | 25                        |
 
 The Skija native library is **not** bundled in the jar — it is downloaded at runtime and
 verified against an SHA-256 manifest generated at build time, so only the small `skija-shared`
@@ -159,7 +159,7 @@ empty cache leaves the overlay disabled until an online launch (never crashes).
 
 ## Building
 
-One Gradle build, one module per Minecraft version (`:platform:26.2`, `:platform:26.1.2`), both
+One Gradle build, one module per Minecraft version (`:platform:26.3`, `:platform:26.2`, `:platform:26.1.2`), all
 sharing `platform/shared`. 26.x ships deobfuscated, so the plain `jar` is the final artifact — no
 remap step.
 
@@ -169,6 +169,8 @@ remap step.
 ./gradlew publishToMavenLocal       # what JitPack runs
 
 # dev clients (each launches the built-in showcase)
+./gradlew :platform:26.3:runClientVulkan
+./gradlew :platform:26.3:runClientOpenGl
 ./gradlew :platform:26.2:runClientVulkan
 ./gradlew :platform:26.2:runClientOpenGl
 ./gradlew :platform:26.1.2:runClient

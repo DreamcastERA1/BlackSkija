@@ -15,3 +15,5 @@ rootProject.name = "blackskija"
 // `platform/shared` source set, compiled anew against its own mappings.
 include("platform:26.2")
 include("platform:26.1.2")
+
+include("platform:26.3")

@@ -1,0 +1,3 @@
+accessWidener v2 official
+accessible field com/mojang/renderpearl/frontend/FrontendGpuDevice backend Lcom/mojang/renderpearl/backend/api/GpuDeviceBackend;
+accessible class com/mojang/renderpearl/backend/opengl/GlDevice
