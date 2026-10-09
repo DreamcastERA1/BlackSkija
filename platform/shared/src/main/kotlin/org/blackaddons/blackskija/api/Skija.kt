@@ -41,6 +41,15 @@ import kotlin.math.tan
 object Skija {
     private val LOG = LoggerFactory.getLogger("blackskija")
 
+    private val opaqueBackdropEffect by lazy {
+        RuntimeEffect.makeForShader("""
+            uniform shader framebuffer;
+            half4 main(float2 position) {
+                return half4(framebuffer.eval(position).rgb, 1.0);
+            }
+        """.trimIndent())
+    }
+
     // Native Skija handles, created lazily. Every draw touches these only inside a batch lambda, which
     // the compositor replays at flush and only once the native is ready — so merely referencing this
     // object before then (queuing a draw, or discard() on the not-ready path) must not force the native
@@ -68,6 +77,30 @@ object Skija {
 
     // Blur masks reused across frames, keyed by sigma. Never closed; they live for the process.
     private val blurMaskCache = HashMap<Float, MaskFilter>()
+
+    private var backdropImage: Image? = null
+    private var backdropGuiWidth = 0f
+    private var backdropGuiHeight = 0f
+    private var backdropFlipY = false
+
+    internal fun setBackdrop(
+        image: Image?,
+        guiWidth: Float,
+        guiHeight: Float,
+        flipY: Boolean,
+    ) {
+        backdropImage = image
+        backdropGuiWidth = guiWidth
+        backdropGuiHeight = guiHeight
+        backdropFlipY = flipY
+    }
+
+    internal fun clearBackdrop() {
+        backdropImage = null
+        backdropGuiWidth = 0f
+        backdropGuiHeight = 0f
+        backdropFlipY = false
+    }
 
     // A full logical pixel becomes visibly detached when a HUD is scaled up.
     private const val TEXT_SHADOW_OFFSET = 0.5f
@@ -244,6 +277,159 @@ object Skija {
         paint.maskFilter = blurMask(sigma)
         it.drawRRect(rect, paint)
         paint.maskFilter = null
+    }
+
+    /**
+     * Blurs the already-rendered Minecraft frame behind this rounded rectangle.
+     *
+     * [blur] is expressed in logical GUI pixels. The framebuffer is sampled directly on the GPU;
+     * there is no CPU readback.
+     *
+     * Draw a translucent rect/gradient after this call if you want a frosted-glass tint.
+     */
+    fun backdropBlur(
+        x: Number,
+        y: Number,
+        w: Number,
+        h: Number,
+        blur: Number,
+        radius: Number = 0,
+        saturation: Float = 1f,
+    ) = draw { canvas ->
+        val image = backdropImage ?: return@draw
+
+        val guiWidth = backdropGuiWidth
+        val guiHeight = backdropGuiHeight
+
+        if (guiWidth <= 0f || guiHeight <= 0f) return@draw
+
+        val fx = x.toFloat()
+        val fy = y.toFloat()
+        val fw = w.toFloat()
+        val fh = h.toFloat()
+        val fr = radius.toFloat().coerceAtLeast(0f)
+
+        if (fw <= 0f || fh <= 0f) return@draw
+
+        // Keep this consistent with dropShadow's public "blur" value:
+        // exposed blur is approximately 2 * Gaussian sigma.
+        val sigma = blur.toFloat().coerceAtLeast(0f) / 2f
+
+        if (sigma <= 0f) return@draw
+
+        // Gaussian contribution is effectively gone by ~3 sigma.
+        // Only draw/filter this expanded region instead of processing the
+        // entire framebuffer for a tiny glass panel.
+        val padding = sigma * 3f
+
+        val left = (fx - padding).coerceAtLeast(0f)
+        val top = (fy - padding).coerceAtLeast(0f)
+        val right = (fx + fw + padding).coerceAtMost(guiWidth)
+        val bottom = (fy + fh + padding).coerceAtMost(guiHeight)
+
+        if (right <= left || bottom <= top) return@draw
+
+        val sourceScaleX = image.width.toFloat() / guiWidth
+        val sourceScaleY = image.height.toFloat() / guiHeight
+
+        val srcX = left * sourceScaleX
+        val srcY = if (backdropFlipY) {
+            image.height.toFloat() - bottom * sourceScaleY
+        } else {
+            top * sourceScaleY
+        }
+
+        // Ignore framebuffer alpha at sampling time, before Skia filters/unpremultiplies it.
+        // Sky passes can leave alpha zero while RGB still contains the visible sky color.
+        val sourceMatrix = Matrix33(
+            1f / sourceScaleX, 0f, left - srcX / sourceScaleX,
+            0f, 1f / sourceScaleY, top - srcY / sourceScaleY,
+            0f, 0f, 1f,
+        )
+        val framebufferShader = image.makeShader(
+            FilterTileMode.CLAMP, FilterTileMode.CLAMP, SamplingMode.DEFAULT, sourceMatrix,
+        )
+        val opaqueShader = opaqueBackdropEffect.makeShader(null, arrayOf(framebufferShader))
+
+        val dstRect = Rect.makeXYWH(
+            left,
+            top,
+            right - left,
+            bottom - top,
+        )
+
+        val clip = RRect.makeXYWH(
+            fx,
+            fy,
+            fw,
+            fh,
+            fr,
+        )
+
+        val blurFilter = ImageFilter.makeBlur(
+            sigma,
+            sigma,
+            FilterTileMode.CLAMP,
+        )
+
+        val s = saturation.coerceAtLeast(0f)
+        val inv = 1f - s
+
+        val r = 0.2126f * inv
+        val g = 0.7152f * inv
+        val b = 0.0722f * inv
+
+        val saturationMatrix = ColorMatrix(
+            r + s, g,     b,     0f, 0f,
+            r,     g + s, b,     0f, 0f,
+            r,     g,     b + s, 0f, 0f,
+
+            // Opacity is established before filtering; preserve blur-edge coverage here.
+            0f,    0f,    0f,    1f, 0f,
+        )
+
+        val saturationFilter =
+            ColorFilter.makeMatrix(saturationMatrix)
+
+        val save = canvas.save()
+
+        try {
+            canvas.clipRRect(
+                clip,
+                activeAntiAlias,
+            )
+
+            imgPaint.reset()
+            imgPaint.isAntiAlias = activeAntiAlias
+            imgPaint.shader = opaqueShader
+            imgPaint.setImageFilter(blurFilter)
+            imgPaint.colorFilter = saturationFilter
+
+
+            if (backdropFlipY) {
+                /*
+                 * We already selected the corresponding framebuffer region above.
+                 * Now flip the contents of that region vertically around its center.
+                 */
+                canvas.translate(
+                    0f,
+                    dstRect.top + dstRect.bottom,
+                )
+                canvas.scale(
+                    1f,
+                    -1f,
+                )
+            }
+
+            canvas.drawRect(dstRect, imgPaint)
+        } finally {
+            imgPaint.reset()
+            canvas.restoreToCount(save)
+            blurFilter.close()
+            saturationFilter.close()
+            opaqueShader.close()
+            framebufferShader.close()
+        }
     }
 
     private fun blurMask(sigma: Float): MaskFilter? {

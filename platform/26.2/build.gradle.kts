@@ -61,4 +61,11 @@ tasks.processResources {
     props.forEach { (k, v) -> inputs.property(k, v) }
     filteringCharset = "UTF-8"
     filesMatching(listOf("fabric.mod.json", "blackskija/skija.version")) { expand(props) }
+    filesMatching("fabric.mod.json") {
+        filter { line ->
+            if (line.trim() == "\"blackskija.mixins.json\"") {
+                "$line,\n    \"blackskija-26.2.mixins.json\""
+            } else line
+        }
+    }
 }

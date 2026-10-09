@@ -1,0 +1,11 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "org.blackaddons.blackskija.mixin",
+  "client": [
+    "GameRendererAccessor"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

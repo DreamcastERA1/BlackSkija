@@ -25,6 +25,7 @@ internal object GlSkijaBackend : SkijaBackend, GpuProfileBackend {
 
     override val flipBlitU = false
     override val flipBlitV = true
+    override val flipBackdropY = true
 
     override fun onBeginFrame() {
         // resetGLAll makes Skia re-issue the state it sets itself; neutralizeUnpack covers the state
@@ -58,15 +59,40 @@ internal object GlSkijaBackend : SkijaBackend, GpuProfileBackend {
         )
     }
 
-    override fun wrapTexture(view: GpuTextureView, premultiplied: Boolean): Image? {
-        val glId = (view as? GlTextureView)?.let { GlTextures.id(it) } ?: return null
-        val info = GLTextureInfo(GL11C.GL_TEXTURE_2D, glId, GL_RGBA8)
-        val backend = BackendTexture.makeGL(view.getWidth(0), view.getHeight(0), false, info)
-        val alpha = if (premultiplied) ColorAlphaType.PREMUL else ColorAlphaType.UNPREMUL
-        val image = Image.borrowTextureFrom(
-            context, backend, SurfaceOrigin.TOP_LEFT, ColorType.RGBA_8888, alpha, null, null,
+    override fun wrapTexture(
+        view: GpuTextureView,
+        alphaType: ColorAlphaType,
+    ): Image? {
+        val glId =
+            (view as? GlTextureView)
+                ?.let { GlTextures.id(it) }
+                ?: return null
+
+        val info = GLTextureInfo(
+            GL11C.GL_TEXTURE_2D,
+            glId,
+            GL_RGBA8,
         )
+
+        val backend = BackendTexture.makeGL(
+            view.getWidth(0),
+            view.getHeight(0),
+            false,
+            info,
+        )
+
+        val image = Image.borrowTextureFrom(
+            context,
+            backend,
+            SurfaceOrigin.TOP_LEFT,
+            ColorType.RGBA_8888,
+            alphaType,
+            null,
+            null,
+        )
+
         backend.close()
+
         return image
     }
 

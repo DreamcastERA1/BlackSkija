@@ -14,6 +14,8 @@ import org.blackaddons.blackskija.backend.common.UnsupportedGpuProfiler
 import org.lwjgl.vulkan.VK
 import org.lwjgl.vulkan.VK10
 import org.lwjgl.vulkan.VK12
+import org.lwjgl.system.MemoryStack
+import com.mojang.blaze3d.vulkan.VulkanCommandEncoder
 
 internal object VulkanSkijaBackend : SkijaBackend, GpuProfileBackend {
 
@@ -26,6 +28,10 @@ internal object VulkanSkijaBackend : SkijaBackend, GpuProfileBackend {
 
     override val displayName = "Vulkan"
 
+    // Minecraft's framebuffer is vertically inverted relative to the borrowed top-left image.
+    // Skija's own top-left UI target still uses the default, unflipped blit UVs.
+    override val flipBackdropY = true
+
     private var cached: DirectContext? = null
 
     // Orders our write before MC's blit read (0-latency); created with the shared device/queue.
@@ -36,6 +42,21 @@ internal object VulkanSkijaBackend : SkijaBackend, GpuProfileBackend {
 
     override val context: DirectContext
         get() = cached ?: createContext().also { cached = it }
+
+    override fun onBeginFrame() {
+        // MC records work until submit(); queue order cannot protect reads of unsubmitted work.
+        // Append a barrier to its current batch and submit both before Skija uses the shared queue.
+        val encoder = unwrapVulkanDevice(RenderSystem.getDevice()).createCommandEncoder()
+        val commands = encoder.allocateAndBeginTransientCommandBuffer()
+        MemoryStack.stackPush().use { stack ->
+            VulkanCommandEncoder.memoryBarrier(commands, stack)
+        }
+        check(VK10.vkEndCommandBuffer(commands) == VK10.VK_SUCCESS) {
+            "Failed to end Minecraft-to-Skija barrier"
+        }
+        encoder.execute(commands)
+        encoder.submit()
+    }
 
     private fun createContext(): DirectContext {
         val device = unwrapVulkanDevice(RenderSystem.getDevice())
@@ -81,11 +102,22 @@ internal object VulkanSkijaBackend : SkijaBackend, GpuProfileBackend {
         )
     }
 
-    override fun wrapTexture(view: GpuTextureView, premultiplied: Boolean): Image? {
-        val texture = view.texture() as? VulkanGpuTexture ?: return null
+    override fun wrapTexture(
+        view: GpuTextureView,
+        alphaType: ColorAlphaType,
+    ): Image? {
+        val texture =
+            view.texture() as? VulkanGpuTexture
+                ?: return null
+
         val format = texture.format
 
-        val fakeAlloc = VulkanAlloc(0L, 0L, 0L, 0)
+        val fakeAlloc = VulkanAlloc(
+            0L,
+            0L,
+            0L,
+            0,
+        )
 
         val info = VkImageInfo(
             texture.vkImage(),
@@ -93,20 +125,35 @@ internal object VulkanSkijaBackend : SkijaBackend, GpuProfileBackend {
             VK_IMAGE_TILING_OPTIMAL,
             VK_IMAGE_LAYOUT_GENERAL,
             VulkanConst.toVk(format),
-            VulkanConst.textureUsageToVk(texture.usage(), format) or VK_USAGE_SAMPLED or VK_USAGE_TRANSFER_SRC,
+            VulkanConst.textureUsageToVk(
+                texture.usage(),
+                format,
+            ) or VK_USAGE_SAMPLED or VK_USAGE_TRANSFER_SRC,
             1,
             1,
             VK_QUEUE_FAMILY_IGNORED,
             false,
             VK_SHARING_MODE_EXCLUSIVE,
         )
-        val backend = BackendTexture.makeVulkan(view.getWidth(0), view.getHeight(0), info)
-        val alpha = if (premultiplied) ColorAlphaType.PREMUL else ColorAlphaType.UNPREMUL
-        val image = Image.borrowTextureFrom(
-            context, backend, SurfaceOrigin.TOP_LEFT,
-            ColorType.RGBA_8888, alpha, ColorSpace.getSRGB(), null,
+
+        val backend = BackendTexture.makeVulkan(
+            view.getWidth(0),
+            view.getHeight(0),
+            info,
         )
+
+        val image = Image.borrowTextureFrom(
+            context,
+            backend,
+            SurfaceOrigin.TOP_LEFT,
+            ColorType.RGBA_8888,
+            alphaType,
+            ColorSpace.getSRGB(),
+            null,
+        )
+
         backend.close()
+
         return image
     }
 

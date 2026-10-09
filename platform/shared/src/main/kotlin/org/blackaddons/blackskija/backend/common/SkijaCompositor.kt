@@ -4,6 +4,8 @@ import com.mojang.blaze3d.systems.RenderSystem
 import com.mojang.blaze3d.textures.FilterMode
 import com.mojang.blaze3d.textures.GpuTexture
 import com.mojang.blaze3d.textures.GpuTextureView
+import io.github.humbleui.skija.Image
+import io.github.humbleui.skija.ColorAlphaType
 import io.github.humbleui.skija.Surface
 import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.render.TextureSetup
@@ -17,7 +19,6 @@ import org.blackaddons.blackskija.api.TextLayoutCache
 import org.blackaddons.blackskija.api.draw.SkijaEntity
 import org.blackaddons.blackskija.api.draw.SkijaItems
 import org.blackaddons.blackskija.api.screen.SkijaOverlay
-import org.blackaddons.blackskija.backend.common.SkijaCompositor.composite
 import org.blackaddons.blackskija.backend.natives.SkijaNatives
 import org.joml.Matrix3x2f
 import org.slf4j.LoggerFactory
@@ -166,24 +167,75 @@ object SkijaCompositor {
             val window = mc.window
             val w = window.width
             val h = window.height
+
             if (window.isIconified || w <= 0 || h <= 0) return
 
-            hudTarget.ensure(backend, w, h)
-            overlayTarget.ensure(backend, w, h)
+            val mainTarget = MainRenderTargetAccess.get()
 
-            val guiScale = w.toFloat() / window.guiScaledWidth.coerceAtLeast(1)
-            val pose = Matrix3x2f().scale(guiScale)
+            val mainColorView =
+                mainTarget.colorTextureView as? GpuTextureView
 
-            // markHudLayer already registered this buffer's blit, down at the HUD's depth; all that
-            // is left is to fill it with the ops queued up to the split.
-            if (hudSplit > 0) render(backend, hudTarget, pose, 0, hudSplit)
+            val backdropImage: Image? =
+                if (mainColorView != null) {
+                    // The framebuffer changes every frame. A fresh image identity prevents Skia's
+                    // image-filter cache from reusing a blur of an earlier frame (including its UI).
+                    backend.wrapTexture(mainColorView, ColorAlphaType.OPAQUE)
+                } else {
+                    null
+                }
 
-            // Everything queued after the HUD finished — a Skija screen, tooltips — plus whatever
-            // content() just added. It goes on top, in a stratum of its own; see [addTopmostBlit].
-            val overlayFrom = hudSplit.coerceAtLeast(0)
-            if (Skija.size() > overlayFrom) {
-                render(backend, overlayTarget, pose, overlayFrom, Int.MAX_VALUE)
-                overlayTarget.view?.let { addTopmostBlit(guiRenderState, backend, it, window.guiScaledWidth, window.guiScaledHeight) }
+            Skija.setBackdrop(
+                backdropImage,
+                window.guiScaledWidth.toFloat(),
+                window.guiScaledHeight.toFloat(),
+                flipY = backend.flipBackdropY,
+            )
+
+            try {
+                hudTarget.ensure(backend, w, h)
+                overlayTarget.ensure(backend, w, h)
+
+                val guiScale =
+                    w.toFloat() / window.guiScaledWidth.coerceAtLeast(1)
+
+                val pose = Matrix3x2f().scale(guiScale)
+
+                // HUD content.
+                if (hudSplit > 0) {
+                    render(
+                        backend,
+                        hudTarget,
+                        pose,
+                        0,
+                        hudSplit,
+                    )
+                }
+
+                // Screens / overlays / anything above the HUD split.
+                val overlayFrom = hudSplit.coerceAtLeast(0)
+
+                if (Skija.size() > overlayFrom) {
+                    render(
+                        backend,
+                        overlayTarget,
+                        pose,
+                        overlayFrom,
+                        Int.MAX_VALUE,
+                    )
+
+                    overlayTarget.view?.let {
+                        addTopmostBlit(
+                            guiRenderState,
+                            backend,
+                            it,
+                            window.guiScaledWidth,
+                            window.guiScaledHeight,
+                        )
+                    }
+                }
+            } finally {
+                Skija.clearBackdrop()
+                backdropImage?.close()
             }
         } catch (t: Throwable) {
             LOG.error("BlackSkija compositing failed - disabling overlay", t)
@@ -304,6 +356,7 @@ object SkijaCompositor {
     internal fun shutdown() {
         try {
             WrappedTextureCache.clear() // close borrowed images before the context that owns them
+            SkijaItems.clear()
             hudTarget.close()
             overlayTarget.close()
             SkijaBackends.active?.dispose()
