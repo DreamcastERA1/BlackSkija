@@ -1,6 +1,7 @@
 package org.blackaddons.blackskija.api
 
 import io.github.humbleui.skija.Canvas
+import io.github.humbleui.skija.FontStyle
 import io.github.humbleui.skija.Paint
 import io.github.humbleui.skija.paragraph.Paragraph
 import io.github.humbleui.skija.paragraph.ParagraphBuilder
@@ -222,7 +223,7 @@ internal object TextLayoutCache {
     }
 
     private fun buildRich(runs: List<RichRun>, size: Float, family: String, lineHeight: Float): Paragraph {
-        val style = TextStyle().setFontSize(size).setFontFamilies(arrayOf(family))
+        val style = textStyle(size, family)
         if (lineHeight != 1f) style.setHeight(lineHeight)
         val paraStyle = ParagraphStyle().setTextStyle(style)
         val builder = ParagraphBuilder(paraStyle, SkijaFonts.collection)
@@ -298,8 +299,23 @@ internal object TextLayoutCache {
         return Entry(p).also { cache[key] = it }
     }
 
-    private fun build(text: String, size: Float, family: String, lineHeight: Float): Paragraph {
+    private fun textStyle(size: Float, family: String): TextStyle {
         val style = TextStyle().setFontSize(size).setFontFamilies(arrayOf(family))
+        val styling = SkijaFonts.styling(family) ?: return style
+        style.setFontStyle(
+            when {
+                styling.bold && styling.italic -> FontStyle.BOLD_ITALIC
+                styling.bold -> FontStyle.BOLD
+                styling.italic -> FontStyle.ITALIC
+                else -> FontStyle.NORMAL
+            },
+        )
+        if (styling.letterSpacing != 0f) style.setLetterSpacing(styling.letterSpacing * size)
+        return style
+    }
+
+    private fun build(text: String, size: Float, family: String, lineHeight: Float): Paragraph {
+        val style = textStyle(size, family)
         if (lineHeight != 1f) style.setHeight(lineHeight)
         val paraStyle = ParagraphStyle().setTextStyle(style)
         val builder = ParagraphBuilder(paraStyle, SkijaFonts.collection)

@@ -4,6 +4,7 @@ import io.github.humbleui.skija.Canvas
 import io.github.humbleui.skija.FontEdging
 import io.github.humbleui.skija.FontHinting
 import io.github.humbleui.skija.Paint
+import io.github.humbleui.skija.TextBlob
 import io.github.humbleui.skija.TextLine
 import io.github.humbleui.skija.Typeface
 import java.util.BitSet
@@ -32,18 +33,30 @@ internal object TextLineCache {
 
     private const val NO_GLYPH: Short = 0
 
+    private const val ITALIC_SKEW = -0.25f
+
     private data class Key(val text: String, val size: Float, val family: String)
 
     private data class FontKey(val family: String, val size: Float)
 
-    private class Entry(val line: TextLine, val ascent: Float)
+    private class Entry(val line: TextLine, val spaced: TextBlob?, val width: Float, val ascent: Float) {
+        fun draw(canvas: Canvas, x: Float, y: Float, paint: Paint) {
+            if (spaced != null) canvas.drawTextBlob(spaced, x, y + ascent, paint)
+            else canvas.drawTextLine(line, x, y + ascent, paint)
+        }
+
+        fun free() {
+            DeferredFree.later(line)
+            spaced?.let(DeferredFree::later)
+        }
+    }
 
     // Evicted lines are parked, not closed: a line already recorded this frame is read by the GPU at
     // the flush. Same rule, and the same drain, as the paragraphs next door.
     private val lines = object : LinkedHashMap<Key, Entry>(64, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Key, Entry>): Boolean {
             if (size <= MAX) return false
-            DeferredFree.later(eldest.value.line)
+            eldest.value.free()
             return true
         }
     }
@@ -72,17 +85,17 @@ internal object TextLineCache {
         paint.reset()
         paint.isAntiAlias = antiAlias
         paint.color = argb
-        canvas.drawTextLine(entry.line, x, y + entry.ascent, paint)
+        entry.draw(canvas, x, y, paint)
     }
 
     // Non-solid foreground (a gradient shader). No restyle and no throwaway: the paint is the draw's,
     // and the record copies it, so the caller may close its shader the moment this returns.
     fun drawShader(canvas: Canvas, text: String, size: Float, family: String, fg: Paint, x: Float, y: Float) {
         val entry = entry(text, size, family) ?: return
-        canvas.drawTextLine(entry.line, x, y + entry.ascent, fg)
+        entry.draw(canvas, x, y, fg)
     }
 
-    fun width(text: String, size: Float, family: String): Float = entry(text, size, family)?.line?.width ?: 0f
+    fun width(text: String, size: Float, family: String): Float = entry(text, size, family)?.width ?: 0f
 
     private fun entry(text: String, size: Float, family: String): Entry? {
         RenderThread.require("text was measured or drawn")
@@ -90,17 +103,33 @@ internal object TextLineCache {
         val key = Key(text, size, family)
         lines[key]?.let { return it }
         val font = font(size, family) ?: return null
-        return Entry(TextLine.make(text, font), -font.metrics.ascent).also { lines[key] = it }
+        val line = TextLine.make(text, font)
+        val spacing = (SkijaFonts.styling(family)?.letterSpacing ?: 0f) * size
+        val spaced = if (spacing == 0f) null else spaced(line, font, spacing)
+        val width = line.width + if (spaced == null) 0f else spacing * line.glyphs.size
+        return Entry(line, spaced, width, -font.metrics.ascent).also { lines[key] = it }
+    }
+
+    private fun spaced(line: TextLine, font: SkFont, spacing: Float): TextBlob? {
+        val glyphs = line.glyphs
+        if (glyphs.isEmpty()) return null
+        val positions = line.positions
+        val stride = positions.size / glyphs.size
+        val xs = FloatArray(glyphs.size) { positions[it * stride] + spacing * it }
+        return TextBlob.makeFromPosH(glyphs, xs, 0f, font)
     }
 
     private fun font(size: Float, family: String): SkFont? {
         val key = FontKey(family, size)
         fonts[key]?.let { return it }
         val typeface = SkijaFonts.typeface(family) ?: return null
+        val styling = SkijaFonts.styling(family)
         val font = SkFont(typeface, size)
             .setHinting(FontHinting.NONE)
             .setSubpixel(true)
             .setEdging(FontEdging.ANTI_ALIAS)
+            .setEmboldened(styling?.bold == true)
+            .setSkewX(if (styling?.italic == true) ITALIC_SKEW else 0f)
         fonts[key] = font
         return font
     }
@@ -110,7 +139,7 @@ internal object TextLineCache {
     private fun invalidateIfFontsChanged() {
         if (fontGeneration == SkijaFonts.generation) return
         fontGeneration = SkijaFonts.generation
-        for (entry in lines.values) DeferredFree.later(entry.line)
+        for (entry in lines.values) entry.free()
         lines.clear()
         for (font in fonts.values) DeferredFree.later(font)
         fonts.clear()
