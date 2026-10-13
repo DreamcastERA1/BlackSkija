@@ -171,6 +171,13 @@ object SkijaCompositor {
             hudTarget.ensure(backend, w, h)
             overlayTarget.ensure(backend, w, h)
 
+            /*
+             * captures the background before any skija rendering is done
+             * this was the only way I could figure out how to get it to work on Vulkan, Vulkan's framebuffer wasn't being cleared the same was as OpenGL
+             * so it was causing our HUD elements to be included in the blur source
+             */
+            if (Skija.blurRequested) BlurSource.capture(backend, w, h)
+
             val guiScale = w.toFloat() / window.guiScaledWidth.coerceAtLeast(1)
             val pose = Matrix3x2f().scale(guiScale)
 
