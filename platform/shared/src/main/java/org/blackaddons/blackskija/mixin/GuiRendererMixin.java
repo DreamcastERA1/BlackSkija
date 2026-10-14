@@ -26,9 +26,6 @@ public class GuiRendererMixin {
     @Shadow
     private GuiItemAtlas itemAtlas;
 
-    @Shadow
-    private void invalidateItemAtlas() {}
-
     @Inject(method = "render", at = @At("HEAD"))
     private void blackskija$composite(CallbackInfo ci) {
         SkijaCompositor.INSTANCE.composite(this.renderState);
@@ -38,6 +35,8 @@ public class GuiRendererMixin {
      * Sizes the item-atlas slot for the largest item on screen, and drops an atlas built at another
      * size: {@code prepareItemAtlas} keeps any atlas that still has room and ignores the size it is
      * passed, so without the rebuild a new slot size would only land when the atlas happened to fill.
+     * Closes the atlas the way {@code prepareItemAtlas} does rather than via {@code invalidateItemAtlas}:
+     * ImmediatelyFast hooks that to drop the animated-item atlas it already prepared for this frame.
      */
     @ModifyArgs(
         method = "prepareItemElements",
@@ -52,7 +51,10 @@ public class GuiRendererMixin {
         if (this.itemAtlas != null) {
             int built = ((GuiItemAtlasAccessor) this.itemAtlas).blackskija$slotTextureSize();
             int perSide = this.itemAtlas.textureSize() / built;
-            if (SkijaItems.INSTANCE.shouldRebuildAtlas(built, wanted, perSide * perSide, items.size())) this.invalidateItemAtlas();
+            if (SkijaItems.INSTANCE.shouldRebuildAtlas(built, wanted, perSide * perSide, items.size())) {
+                this.itemAtlas.close();
+                this.itemAtlas = null;
+            }
         }
         args.set(1, wanted);
     }
