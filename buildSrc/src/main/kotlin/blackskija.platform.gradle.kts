@@ -35,6 +35,7 @@ java {
 }
 
 repositories {
+    maven("https://maven-central.storage-download.googleapis.com/maven2/") { name = "Maven Central mirror" }
     mavenCentral()
     maven("https://maven.fabricmc.net/") { name = "Fabric" }
 }
