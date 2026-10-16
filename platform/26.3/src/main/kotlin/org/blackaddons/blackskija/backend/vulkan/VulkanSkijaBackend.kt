@@ -111,9 +111,9 @@ internal object VulkanSkijaBackend : SkijaBackend, GpuProfileBackend {
         return image
     }
 
-    override fun orderWriteBeforeRead(view: GpuTextureView) {
-        val image = (view.texture() as? VulkanGpuTexture)?.vkImage() ?: return
-        barrier?.order(image)
+    override fun orderWriteBeforeRead(views: List<GpuTextureView>) {
+        val images = views.mapNotNull { (it.texture() as? VulkanGpuTexture)?.vkImage() }
+        if (images.isNotEmpty()) barrier?.order(images)
     }
 
     override fun dispose() {

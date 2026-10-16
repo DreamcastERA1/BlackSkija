@@ -15,11 +15,11 @@ internal interface SkijaBackend {
     fun saveState() {}
     fun restoreState() {}
 
-    // Orders this frame's write into view before MC's blit read, so we can blit the buffer drawn this
-    // frame (0 latency). Vulkan submits a pipeline barrier; GL is already ordered, so the no-op fits.
-    fun orderWriteBeforeRead(view: GpuTextureView) {}
+    // Orders this frame's writes into views before MC's blit reads, so we can blit the buffers drawn this
+    // frame (0 latency). Vulkan submits one pipeline barrier for all of them; GL is already ordered.
+    fun orderWriteBeforeRead(views: List<GpuTextureView>) {}
 
-    // Hands the frame's flushed work to the GPU. Vulkan needs it every frame for the blit to see it.
+    // Hands the frame's flushed work to the GPU, once per frame. Vulkan needs it every frame for the blit to see it.
     fun submit() {
         context.submit(false)
     }

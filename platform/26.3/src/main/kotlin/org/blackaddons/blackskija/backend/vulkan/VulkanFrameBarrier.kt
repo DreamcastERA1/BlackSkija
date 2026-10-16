@@ -20,7 +20,7 @@ internal class VulkanFrameBarrier(
     private var ready = false
     private var frame = 0
 
-    fun order(image: Long) {
+    fun order(images: List<Long>) {
         if (!ready) {
             runCatching { init() }.onFailure {
                 LOG.warn("BlackSkija: pipeline-barrier init failed, falling back to no ordering", it)
@@ -45,24 +45,27 @@ internal class VulkanFrameBarrier(
                 .flags(VK10.VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT)
             VK10.vkBeginCommandBuffer(cmd, begin)
 
-            val barrier = VkImageMemoryBarrier.calloc(1, stack)
-            barrier.sType(VK10.VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER)
-                .srcAccessMask(VK10.VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT or VK10.VK_ACCESS_TRANSFER_WRITE_BIT)
-                .dstAccessMask(VK10.VK_ACCESS_SHADER_READ_BIT)
-                .oldLayout(VK10.VK_IMAGE_LAYOUT_GENERAL)
-                .newLayout(VK10.VK_IMAGE_LAYOUT_GENERAL)
-                .srcQueueFamilyIndex(VK10.VK_QUEUE_FAMILY_IGNORED)
-                .dstQueueFamilyIndex(VK10.VK_QUEUE_FAMILY_IGNORED)
-                .image(image)
-            barrier.subresourceRange()
-                .aspectMask(VK10.VK_IMAGE_ASPECT_COLOR_BIT)
-                .baseMipLevel(0).levelCount(1).baseArrayLayer(0).layerCount(1)
+            val barriers = VkImageMemoryBarrier.calloc(images.size, stack)
+            images.forEachIndexed { i, image ->
+                val barrier = barriers.get(i)
+                barrier.sType(VK10.VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER)
+                    .srcAccessMask(VK10.VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT or VK10.VK_ACCESS_TRANSFER_WRITE_BIT)
+                    .dstAccessMask(VK10.VK_ACCESS_SHADER_READ_BIT)
+                    .oldLayout(VK10.VK_IMAGE_LAYOUT_GENERAL)
+                    .newLayout(VK10.VK_IMAGE_LAYOUT_GENERAL)
+                    .srcQueueFamilyIndex(VK10.VK_QUEUE_FAMILY_IGNORED)
+                    .dstQueueFamilyIndex(VK10.VK_QUEUE_FAMILY_IGNORED)
+                    .image(image)
+                barrier.subresourceRange()
+                    .aspectMask(VK10.VK_IMAGE_ASPECT_COLOR_BIT)
+                    .baseMipLevel(0).levelCount(1).baseArrayLayer(0).layerCount(1)
+            }
 
             VK10.vkCmdPipelineBarrier(
                 cmd,
                 VK10.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT or VK10.VK_PIPELINE_STAGE_TRANSFER_BIT,
                 VK10.VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-                0, null, null, barrier,
+                0, null, null, barriers,
             )
             VK10.vkEndCommandBuffer(cmd)
 

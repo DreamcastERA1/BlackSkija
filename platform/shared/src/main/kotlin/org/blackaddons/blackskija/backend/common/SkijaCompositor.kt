@@ -77,6 +77,7 @@ object SkijaCompositor {
     // A third, opt-in buffer sits between them when a consumer calls [markScreenLayer]; it is only
     // allocated once something asks for it.
     private val hudTarget = Target("blackskija hud")
+    private val drawn = ArrayList<GpuTextureView>(3)
     private val screenTarget = Target("blackskija screen")
     private val overlayTarget = Target("blackskija ui")
 
@@ -211,6 +212,7 @@ object SkijaCompositor {
 
             // markHudLayer already registered this buffer's blit, down at the HUD's depth; all that
             // is left is to fill it with the ops queued up to the split.
+            drawn.clear()
             if (hudSplit > 0) render(backend, hudTarget, pose, 0, hudSplit)
             val screenFrom = hudSplit.coerceAtLeast(0)
             if (screenSplit > screenFrom) render(backend, screenTarget, pose, screenFrom, screenSplit)
@@ -221,6 +223,11 @@ object SkijaCompositor {
             if (Skija.size() > overlayFrom) {
                 render(backend, overlayTarget, pose, overlayFrom, Int.MAX_VALUE)
                 overlayTarget.view?.let { addTopmostBlit(guiRenderState, backend, it, window.guiScaledWidth, window.guiScaledHeight) }
+            }
+            /* One submit and one barrier for every buffer drawn: each is a queue submission. */
+            if (drawn.isNotEmpty()) {
+                backend.submit()
+                backend.orderWriteBeforeRead(drawn)
             }
         } catch (t: Throwable) {
             LOG.error("BlackSkija compositing failed - disabling overlay", t)
@@ -241,7 +248,7 @@ object SkijaCompositor {
         }
     }
 
-    /** Replays `batch[from, to)` onto [target]'s surface and orders the write before MC reads it. */
+    /** Replays `batch[from, to)` onto [target]'s surface and flushes it; the frame submits once at the end. */
     private fun render(backend: SkijaBackend, target: Target, pose: Matrix3x2f, from: Int, to: Int) {
         val surface = target.surface ?: return
         val view = target.view ?: return
@@ -265,15 +272,11 @@ object SkijaCompositor {
                 cursor = range.end
             }
             if (cursor < to) Skija.flush(session, cursor, to)
-            // Flush, hand to the GPU as often as the backend needs, then order this write before MC's blit
-            // read of the same texture. Lets us blit the buffer drawn this frame with no submit semaphore
-            // (0.143.17 has none).
             backend.context.flush(surface)
-            backend.submit()
         } finally {
             Skija.endFlush(session)
         }
-        backend.orderWriteBeforeRead(view)
+        drawn += view
     }
 
     /**
