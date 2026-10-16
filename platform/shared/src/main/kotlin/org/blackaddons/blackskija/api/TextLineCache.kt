@@ -31,6 +31,8 @@ internal object TextLineCache {
 
     private const val MAX = 256
 
+    private const val MAX_JOINED = 64
+
     private const val NO_GLYPH: Short = 0
 
     private const val ITALIC_SKEW = -0.25f
@@ -39,15 +41,22 @@ internal object TextLineCache {
 
     private data class FontKey(val family: String, val size: Float)
 
-    private class Entry(val line: TextLine, val spaced: TextBlob?, val width: Float, val ascent: Float) {
+    private class Entry(
+        val line: TextLine?,
+        val blob: TextBlob?,
+        val glyphs: ShortArray,
+        val xs: FloatArray,
+        val width: Float,
+        val ascent: Float,
+    ) {
         fun draw(canvas: Canvas, x: Float, y: Float, paint: Paint) {
-            if (spaced != null) canvas.drawTextBlob(spaced, x, y + ascent, paint)
-            else canvas.drawTextLine(line, x, y + ascent, paint)
+            if (blob != null) canvas.drawTextBlob(blob, x, y + ascent, paint)
+            else if (line != null) canvas.drawTextLine(line, x, y + ascent, paint)
         }
 
         fun free() {
-            DeferredFree.later(line)
-            spaced?.let(DeferredFree::later)
+            line?.let(DeferredFree::later)
+            blob?.let(DeferredFree::later)
         }
     }
 
@@ -56,6 +65,14 @@ internal object TextLineCache {
     private val lines = object : LinkedHashMap<Key, Entry>(64, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Key, Entry>): Boolean {
             if (size <= MAX) return false
+            eldest.value.free()
+            return true
+        }
+    }
+
+    private val joined = object : LinkedHashMap<Key, Entry>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Key, Entry>): Boolean {
+            if (size <= MAX_JOINED) return false
             eldest.value.free()
             return true
         }
@@ -81,21 +98,74 @@ internal object TextLineCache {
         canvas: Canvas, text: String, size: Float, family: String,
         argb: Int, antiAlias: Boolean, x: Float, y: Float,
     ) {
-        val entry = entry(text, size, family) ?: return
         paint.reset()
         paint.isAntiAlias = antiAlias
         paint.color = argb
-        entry.draw(canvas, x, y, paint)
+        drawLine(canvas, text, size, family, x, y, paint)
     }
 
     // Non-solid foreground (a gradient shader). No restyle and no throwaway: the paint is the draw's,
     // and the record copies it, so the caller may close its shader the moment this returns.
     fun drawShader(canvas: Canvas, text: String, size: Float, family: String, fg: Paint, x: Float, y: Float) {
-        val entry = entry(text, size, family) ?: return
-        entry.draw(canvas, x, y, fg)
+        drawLine(canvas, text, size, family, x, y, fg)
     }
 
-    fun width(text: String, size: Float, family: String): Float = entry(text, size, family)?.width ?: 0f
+    fun width(text: String, size: Float, family: String): Float = lineEntry(text, size, family)?.width ?: 0f
+
+    private fun drawLine(canvas: Canvas, text: String, size: Float, family: String, x: Float, y: Float, paint: Paint) {
+        lineEntry(text, size, family)?.draw(canvas, x, y, paint)
+    }
+
+    /* A timer is a new string every frame: its digits are shaped once each and joined into one blob, minus kerning beside digits. */
+    private fun lineEntry(text: String, size: Float, family: String): Entry? {
+        val parts = digitSplit(text) ?: return entry(text, size, family)
+        RenderThread.require("text was measured or drawn")
+        invalidateIfFontsChanged()
+        val key = Key(text, size, family)
+        joined[key]?.let { return it }
+        val pieces = parts.map { entry(it, size, family) ?: return null }
+        val font = font(size, family) ?: return null
+        val glyphs = ShortArray(pieces.sumOf { it.glyphs.size })
+        val xs = FloatArray(glyphs.size)
+        var at = 0
+        var offset = 0f
+        for (piece in pieces) {
+            piece.glyphs.copyInto(glyphs, at)
+            for (i in piece.xs.indices) xs[at + i] = piece.xs[i] + offset
+            at += piece.glyphs.size
+            offset += piece.width
+        }
+        val blob = if (glyphs.isEmpty()) null else TextBlob.makeFromPosH(glyphs, xs, 0f, font)
+        return Entry(null, blob, glyphs, xs, offset, pieces[0].ascent).also { joined[key] = it }
+    }
+
+    private fun digitSplit(text: String): List<String>? {
+        if (text.length < 2 || text.none(::isDigit)) return null
+        val parts = ArrayList<String>()
+        var start = 0
+        var i = 0
+        while (i < text.length) {
+            if (!isDigit(text[i])) {
+                i++
+                continue
+            }
+            if (i > start) parts += text.substring(start, i)
+            var end = i + 1
+            while (end < text.length && isMark(text[end])) end++
+            parts += text.substring(i, end)
+            start = end
+            i = end
+        }
+        if (start < text.length) parts += text.substring(start)
+        return parts
+    }
+
+    private fun isDigit(c: Char): Boolean = c in '0'..'9'
+
+    private fun isMark(c: Char): Boolean = when (Character.getType(c).toByte()) {
+        Character.NON_SPACING_MARK, Character.ENCLOSING_MARK, Character.COMBINING_SPACING_MARK, Character.FORMAT -> true
+        else -> false
+    }
 
     private fun entry(text: String, size: Float, family: String): Entry? {
         RenderThread.require("text was measured or drawn")
@@ -105,18 +175,13 @@ internal object TextLineCache {
         val font = font(size, family) ?: return null
         val line = TextLine.make(text, font)
         val spacing = (SkijaFonts.styling(family)?.letterSpacing ?: 0f) * size
-        val spaced = if (spacing == 0f) null else spaced(line, font, spacing)
-        val width = line.width + if (spaced == null) 0f else spacing * line.glyphs.size
-        return Entry(line, spaced, width, -font.metrics.ascent).also { lines[key] = it }
-    }
-
-    private fun spaced(line: TextLine, font: SkFont, spacing: Float): TextBlob? {
         val glyphs = line.glyphs
-        if (glyphs.isEmpty()) return null
         val positions = line.positions
-        val stride = positions.size / glyphs.size
+        val stride = if (glyphs.isEmpty()) 1 else positions.size / glyphs.size
         val xs = FloatArray(glyphs.size) { positions[it * stride] + spacing * it }
-        return TextBlob.makeFromPosH(glyphs, xs, 0f, font)
+        val spaced = if (spacing == 0f || glyphs.isEmpty()) null else TextBlob.makeFromPosH(glyphs, xs, 0f, font)
+        val width = line.width + if (spaced == null) 0f else spacing * glyphs.size
+        return Entry(line, spaced, glyphs, xs, width, -font.metrics.ascent).also { lines[key] = it }
     }
 
     private fun font(size: Float, family: String): SkFont? {
@@ -141,6 +206,8 @@ internal object TextLineCache {
         fontGeneration = SkijaFonts.generation
         for (entry in lines.values) entry.free()
         lines.clear()
+        for (entry in joined.values) entry.free()
+        joined.clear()
         for (font in fonts.values) DeferredFree.later(font)
         fonts.clear()
         coverage.clear()

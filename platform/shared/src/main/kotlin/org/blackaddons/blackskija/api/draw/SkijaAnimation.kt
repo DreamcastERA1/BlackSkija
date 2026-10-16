@@ -11,10 +11,10 @@ import org.blackaddons.blackskija.api.Skija
  * time.
  *
  * A frame is decoded one at a time, and is usually a *delta* on the one before it, so the frames are
- * decoded on demand and only ever forward from what is already in hand: playing at speed costs one
- * decode per frame shown, and nothing is decoded for an animation nobody is looking at.
- * Decoding all of them up front would be simpler and would hold width × height × 4 bytes per frame
- * for as long as the picture existed.
+ * decoded on demand and only ever forward from what is already in hand, and nothing is decoded for an
+ * animation nobody is looking at. Decoded frames are kept, up to 32 MB per picture, so every loop
+ * after the first costs no decode, copy or upload for them; frames past that budget are decoded as
+ * they come round.
  *
  * Ask for [imageAt] every frame and draw what it gives you; it returns the same [Image] until the
  * animation actually moves on. Loops forever — [durationMs] and [repetitions] are there for a caller
@@ -65,6 +65,11 @@ class SkijaAnimation internal constructor(private val frames: AnimationFrames) :
     private var current: Image? = null
     private var closed = false
 
+    private val frameBytes = width.toLong() * height * 4
+    private val kept: Array<Image?>? = if (frameCount > 1) arrayOfNulls(frameCount) else null
+    private var keptBytes = 0L
+    private var keptCount = 0
+
     // A handed-out handle can be closed by its holder, so the cache asks before serving one again.
     internal val isOpen: Boolean get() = !closed
 
@@ -87,14 +92,32 @@ class SkijaAnimation internal constructor(private val frames: AnimationFrames) :
         if (closed) return null
         val target = frameIndexAt(elapsedMs)
         if (target == shownIndex) return current
+        kept?.get(target)?.let { return show(target, it) }
         if (!decode(target)) return current
         // The bitmap is mutable and about to be drawn on again, so this makes a copy rather than
         // sharing its pixels — which is what lets the previous frame stay valid until its last draw.
         val image = Image.makeRasterFromBitmap(pixels())
-        current?.let { DeferredFree.later(it) }
+        if (kept != null && keptBytes + frameBytes <= MAX_KEPT_FRAME_BYTES) {
+            kept[target] = image
+            keptBytes += frameBytes
+            if (++keptCount == frameCount) releaseDecoder()
+        }
+        return show(target, image)
+    }
+
+    private fun show(index: Int, image: Image): Image {
+        if (!isKept(shownIndex)) current?.let { DeferredFree.later(it) }
         current = image
-        shownIndex = target
+        shownIndex = index
         return image
+    }
+
+    private fun isKept(index: Int): Boolean = index >= 0 && kept?.get(index) != null
+
+    private fun releaseDecoder() {
+        bitmap?.let { DeferredFree.later(it) }
+        bitmap = null
+        decoded = -1
     }
 
     private fun pixels(): Bitmap =
@@ -142,7 +165,8 @@ class SkijaAnimation internal constructor(private val frames: AnimationFrames) :
     override fun close() {
         if (closed) return
         closed = true
-        current?.let { DeferredFree.later(it) }
+        if (!isKept(shownIndex)) current?.let { DeferredFree.later(it) }
+        kept?.forEach { image -> image?.let { DeferredFree.later(it) } }
         current = null
         bitmap?.let { DeferredFree.later(it) }
         bitmap = null
@@ -152,5 +176,6 @@ class SkijaAnimation internal constructor(private val frames: AnimationFrames) :
     private companion object {
         const val MIN_FRAME_MS = 10
         const val DEFAULT_FRAME_MS = 100
+        const val MAX_KEPT_FRAME_BYTES = 32L * 1024 * 1024
     }
 }
