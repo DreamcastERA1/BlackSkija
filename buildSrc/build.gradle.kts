@@ -4,8 +4,8 @@ plugins {
 
 repositories {
     maven("https://maven-central.storage-download.googleapis.com/maven2/") { name = "Maven Central mirror" }
-    mavenCentral()
     gradlePluginPortal()
+    mavenCentral()
 }
 
 // buildSrc is its own Gradle build, so `providers.gradleProperty` reads *its* properties, not the
