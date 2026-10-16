@@ -6,6 +6,7 @@ import org.blackaddons.blackskija.compat.GpuTexture
 import org.blackaddons.blackskija.compat.GpuTextureView
 import io.github.humbleui.skija.Surface
 import net.minecraft.client.Minecraft
+import net.minecraft.client.gui.GuiGraphicsExtractor
 import net.minecraft.client.gui.render.TextureSetup
 import net.minecraft.client.renderer.RenderPipelines
 import net.minecraft.client.renderer.state.gui.BlitRenderState
@@ -19,6 +20,7 @@ import org.blackaddons.blackskija.api.draw.SkijaItems
 import org.blackaddons.blackskija.api.screen.SkijaOverlay
 import org.blackaddons.blackskija.backend.common.SkijaCompositor.composite
 import org.blackaddons.blackskija.backend.natives.SkijaNatives
+import org.blackaddons.blackskija.mixin.GuiGraphicsExtractorAccessor
 import org.joml.Matrix3x2f
 import org.slf4j.LoggerFactory
 
@@ -72,12 +74,19 @@ object SkijaCompositor {
     // belongs *under* screens and overlays; anything queued afterwards (a Skija screen, tooltips)
     // belongs on top. One buffer cannot be sampled at two depths without also showing the other's
     // content, so each blit gets its own.
+    // A third, opt-in buffer sits between them when a consumer calls [markScreenLayer]; it is only
+    // allocated once something asks for it.
     private val hudTarget = Target("blackskija hud")
+    private val screenTarget = Target("blackskija screen")
     private val overlayTarget = Target("blackskija ui")
 
     // Ops queued when the HUD finished extracting — the split between the two buffers. -1 when the
     // boundary wasn't reached this frame (no HUD, or no buffer yet), which sends everything on top.
     private var hudSplit = -1
+
+    // Same for [markScreenLayer]: ops queued up to here, after the HUD's, go to the screen buffer.
+    private var screenSplit = -1
+    private var screenWanted = false
 
     private var warmed = false
 
@@ -106,6 +115,31 @@ object SkijaCompositor {
         val blitView = hudTarget.view ?: return
 
         hudSplit = queued
+        addBlit(guiRenderState, backend, blitView, window.guiScaledWidth, window.guiScaledHeight)
+    }
+
+    /**
+     * Composites everything queued since the HUD into a stratum of its own, opened right now, instead
+     * of on top of the whole frame. Call it from a screen's extraction when its Skija draws should stay
+     * under what the screen extracts afterwards, e.g. right before `extractDeferredElements` to stay
+     * under the screen's tooltip. Draws queued after this call still go on top.
+     *
+     * At most once per frame. The buffer is created on the first call, so that frame composites on top.
+     */
+    fun markScreenLayer(graphics: GuiGraphicsExtractor) {
+        if (!SkijaNatives.ready) return
+        val backend = SkijaBackends.active ?: return
+        val queued = Skija.size()
+        if (queued <= hudSplit.coerceAtLeast(0)) return
+
+        screenWanted = true
+        val window = Minecraft.getInstance().window
+        if (!screenTarget.matches(window.width, window.height)) return
+        val blitView = screenTarget.view ?: return
+
+        screenSplit = queued
+        val guiRenderState = (graphics as GuiGraphicsExtractorAccessor).`blackskija$guiRenderState`()
+        guiRenderState.nextStratum()
         addBlit(guiRenderState, backend, blitView, window.guiScaledWidth, window.guiScaledHeight)
     }
 
@@ -169,6 +203,7 @@ object SkijaCompositor {
             if (window.isIconified || w <= 0 || h <= 0) return
 
             hudTarget.ensure(backend, w, h)
+            if (screenWanted) screenTarget.ensure(backend, w, h)
             overlayTarget.ensure(backend, w, h)
 
             val guiScale = w.toFloat() / window.guiScaledWidth.coerceAtLeast(1)
@@ -177,10 +212,12 @@ object SkijaCompositor {
             // markHudLayer already registered this buffer's blit, down at the HUD's depth; all that
             // is left is to fill it with the ops queued up to the split.
             if (hudSplit > 0) render(backend, hudTarget, pose, 0, hudSplit)
+            val screenFrom = hudSplit.coerceAtLeast(0)
+            if (screenSplit > screenFrom) render(backend, screenTarget, pose, screenFrom, screenSplit)
 
             // Everything queued after the HUD finished — a Skija screen, tooltips — plus whatever
             // content() just added. It goes on top, in a stratum of its own; see [addTopmostBlit].
-            val overlayFrom = hudSplit.coerceAtLeast(0)
+            val overlayFrom = maxOf(hudSplit, screenSplit, 0)
             if (Skija.size() > overlayFrom) {
                 render(backend, overlayTarget, pose, overlayFrom, Int.MAX_VALUE)
                 overlayTarget.view?.let { addTopmostBlit(guiRenderState, backend, it, window.guiScaledWidth, window.guiScaledHeight) }
@@ -197,6 +234,7 @@ object SkijaCompositor {
             TextLayoutCache.releaseEvicted()
             DeferredFree.release()
             hudSplit = -1
+            screenSplit = -1
             backend.restoreState()
             SkijaItems.endFrame()
             SkijaEntity.endFrame()
@@ -307,6 +345,7 @@ object SkijaCompositor {
         try {
             WrappedTextureCache.clear() // close borrowed images before the context that owns them
             hudTarget.close()
+            screenTarget.close()
             overlayTarget.close()
             SkijaBackends.active?.dispose()
         } catch (e: Throwable) {
