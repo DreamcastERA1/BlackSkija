@@ -4,6 +4,7 @@ import org.blackaddons.blackskija.compat.GpuTextureView
 import io.github.humbleui.skija.Canvas
 import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.navigation.ScreenRectangle
+import net.minecraft.client.gui.render.GuiItemAtlas
 import net.minecraft.client.renderer.item.TrackingItemStackRenderState
 import net.minecraft.client.renderer.state.gui.GuiItemRenderState
 import net.minecraft.client.renderer.state.gui.GuiRenderState
@@ -11,6 +12,7 @@ import net.minecraft.world.item.ItemDisplayContext
 import net.minecraft.world.item.ItemStack
 import org.blackaddons.blackskija.api.Skija
 import org.blackaddons.blackskija.api.SkijaTextures
+import org.blackaddons.blackskija.mixin.GuiItemAtlasAccessor
 import org.joml.Matrix3x2f
 import java.awt.Color
 import java.util.*
@@ -94,6 +96,65 @@ object SkijaItems {
         renderState = null
         captured.keys.retainAll(requestedThisFrame)
     }
+
+    private var deferredAtlasEndFrame: GuiItemAtlas? = null
+    private var animatedAtlas: GuiItemAtlas? = null
+    private var vanillaSlot = 0
+    private var replayingAtlasEndFrame = false
+
+    /**
+     * ImmediatelyFast's animated-item atlas wipes its texture in `endFrame`, but captured items are
+     * drawn from it a frame later. Holds that `endFrame` back until [replayAtlasEndFrame] runs right
+     * after the composite has sampled the atlas. Called from ImmediatelyFastAnimatedItemAtlasMixin.
+     */
+    fun deferAtlasEndFrame(atlas: GuiItemAtlas): Boolean {
+        if (replayingAtlasEndFrame) return false
+        deferredAtlasEndFrame = atlas
+        animatedAtlas = atlas
+        return true
+    }
+
+    fun replayAtlasEndFrame() {
+        val atlas = deferredAtlasEndFrame ?: return
+        deferredAtlasEndFrame = null
+        replayingAtlasEndFrame = true
+        try {
+            atlas.endFrame()
+        } finally {
+            replayingAtlasEndFrame = false
+        }
+    }
+
+    fun atlasClosed(atlas: GuiItemAtlas) {
+        if (deferredAtlasEndFrame === atlas) deferredAtlasEndFrame = null
+        if (animatedAtlas === atlas) animatedAtlas = null
+    }
+
+    /**
+     * The slot size for [vanillaSlot] that a new atlas gets this frame. Remembers [vanillaSlot] so
+     * [shouldRebuildAtlases] can decide before the next frame's items are prepared.
+     */
+    fun atlasSlotSize(vanillaSlot: Int): Int {
+        this.vanillaSlot = vanillaSlot
+        return slotTextureSize(vanillaSlot)
+    }
+
+    /**
+     * Whether to invalidate the item atlases (vanilla's and ImmediatelyFast's animated one, which
+     * invalidates with it) before this frame prepares its items. Called after the composite, once
+     * this frame's item sizes are known.
+     */
+    fun shouldRebuildAtlases(vanilla: GuiItemAtlas?, itemCount: Int): Boolean {
+        if (vanillaSlot == 0) return false
+        val animated = animatedAtlas
+        if (vanilla != null && animated != null && builtSlot(animated) != builtSlot(vanilla)) return true
+        val atlas = vanilla ?: animated ?: return false
+        val built = builtSlot(atlas)
+        val perSide = atlas.textureSize() / built
+        return shouldRebuildAtlas(built, slotTextureSize(vanillaSlot), perSide * perSide, itemCount)
+    }
+
+    private fun builtSlot(atlas: GuiItemAtlas): Int = (atlas as GuiItemAtlasAccessor).`blackskija$slotTextureSize`()
 
     // Called from GuiItemCaptureMixin (Java). Must stay public despite being internal use.
     fun capture(state: GuiItemRenderState, view: GpuTextureView, u0: Float, v0: Float, u1: Float, v1: Float): Boolean {
