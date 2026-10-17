@@ -15,9 +15,11 @@ internal interface SkijaBackend {
     fun saveState() {}
     fun restoreState() {}
 
-    // Orders this frame's writes into views before MC's blit reads, so we can blit the buffers drawn this
-    // frame (0 latency). Vulkan submits one pipeline barrier for all of them; GL is already ordered.
-    fun orderWriteBeforeRead(views: List<GpuTextureView>) {}
+    /* Readies [targets] and the borrowed [sampled] textures for Skia before its submit; Vulkan moves them out of Minecraft's layout. */
+    fun acquire(targets: List<GpuTextureView>, sampled: Collection<GpuTextureView>) {}
+
+    /* Hands back what acquire took, ordered before MC's blit reads, so we can blit the buffers drawn this frame (0 latency). */
+    fun release() {}
 
     // Hands the frame's flushed work to the GPU, once per frame. Vulkan needs it every frame for the blit to see it.
     fun submit() {

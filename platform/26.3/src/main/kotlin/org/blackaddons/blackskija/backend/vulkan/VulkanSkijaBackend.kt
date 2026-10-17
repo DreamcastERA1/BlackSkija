@@ -3,6 +3,7 @@ package org.blackaddons.blackskija.backend.vulkan
 import com.mojang.renderpearl.api.device.GpuDevice
 import com.mojang.blaze3d.systems.RenderSystem
 import com.mojang.renderpearl.api.textures.GpuTextureView
+import com.mojang.renderpearl.backend.vulkan.VulkanCommandEncoder
 import com.mojang.renderpearl.backend.vulkan.VulkanConst
 import com.mojang.renderpearl.backend.vulkan.VulkanDevice
 import com.mojang.renderpearl.backend.vulkan.VulkanGpuTexture
@@ -12,14 +13,17 @@ import org.blackaddons.blackskija.backend.common.GpuProfileBackend
 import org.blackaddons.blackskija.backend.common.GpuProfiler
 import org.blackaddons.blackskija.backend.common.SkijaBackend
 import org.blackaddons.blackskija.backend.common.UnsupportedGpuProfiler
+import org.lwjgl.system.MemoryStack
 import org.lwjgl.vulkan.VK
 import org.lwjgl.vulkan.VK10
 import org.lwjgl.vulkan.VK12
+import org.lwjgl.vulkan.VkCommandBuffer
 
 internal object VulkanSkijaBackend : SkijaBackend, GpuProfileBackend {
 
     private const val VK_IMAGE_TILING_OPTIMAL = 0
-    private const val VK_IMAGE_LAYOUT_GENERAL = 1
+    private const val VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL = 2
+    private const val VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL = 5
     private const val VK_USAGE_TRANSFER_SRC = 0x1
     private const val VK_USAGE_SAMPLED = 0x4
     private const val VK_QUEUE_FAMILY_IGNORED = -1
@@ -29,9 +33,16 @@ internal object VulkanSkijaBackend : SkijaBackend, GpuProfileBackend {
 
     private var cached: DirectContext? = null
 
-    // Orders our write before MC's blit read (0-latency); created with the shared device/queue.
+    /* Acquires and releases images around Skia's submit; created with the shared device/queue. */
     private var barrier: VulkanFrameBarrier? = null
     private var profiler: VulkanGpuProfiler? = null
+
+    /*
+     * Images acquire() moved out of Minecraft's GENERAL, with the layout Skia was told they are in. Skia
+     * keeps believing the layout an image was wrapped with, so buffers are wrapped as color attachments
+     * and borrowed textures as sampled, and only ever leave that layout between acquire and release.
+     */
+    private val acquired = LinkedHashMap<Long, Int>()
 
     override val gpuProfiler: GpuProfiler get() = profiler ?: UnsupportedGpuProfiler
 
@@ -71,7 +82,7 @@ internal object VulkanSkijaBackend : SkijaBackend, GpuProfileBackend {
             view.getHeight(0),
             texture.vkImage(),
             VK_IMAGE_TILING_OPTIMAL,
-            VK_IMAGE_LAYOUT_GENERAL,
+            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
             VulkanConst.toVk(format),
             VulkanConst.textureUsageToVk(texture.usage(), format) or VK_USAGE_TRANSFER_SRC,
             1,
@@ -92,7 +103,7 @@ internal object VulkanSkijaBackend : SkijaBackend, GpuProfileBackend {
             texture.vkImage(),
             fakeAlloc,
             VK_IMAGE_TILING_OPTIMAL,
-            VK_IMAGE_LAYOUT_GENERAL,
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
             VulkanConst.toVk(format),
             VulkanConst.textureUsageToVk(texture.usage(), format) or VK_USAGE_SAMPLED or VK_USAGE_TRANSFER_SRC,
             1,
@@ -111,9 +122,39 @@ internal object VulkanSkijaBackend : SkijaBackend, GpuProfileBackend {
         return image
     }
 
-    override fun orderWriteBeforeRead(views: List<GpuTextureView>) {
-        val images = views.mapNotNull { (it.texture() as? VulkanGpuTexture)?.vkImage() }
-        if (images.isNotEmpty()) barrier?.order(images)
+    override fun acquire(targets: List<GpuTextureView>, sampled: Collection<GpuTextureView>) {
+        val barrier = barrier?.takeIf { it.ensureReady() } ?: return
+        val fresh = LinkedHashMap<Long, Int>()
+        for (view in targets) take(view, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, fresh)
+        for (view in sampled) take(view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, fresh)
+        val init = takeInitCommands()
+        if (init != null || fresh.isNotEmpty()) barrier.submit(init, fresh, release = false)
+    }
+
+    override fun release() {
+        if (acquired.isEmpty()) return
+        barrier?.submit(null, acquired, release = true)
+        acquired.clear()
+    }
+
+    private fun take(view: GpuTextureView, layout: Int, fresh: MutableMap<Long, Int>) {
+        if (view.isClosed) return
+        val image = (view.texture() as? VulkanGpuTexture)?.vkImage() ?: return
+        if (acquired.putIfAbsent(image, layout) == null) fresh[image] = layout
+    }
+
+    /*
+     * renderpearl records a new texture's first transition into an init command buffer that only reaches
+     * the queue with the frame's own submit, after Skia's. Sent ahead, Skia never meets an image still
+     * UNDEFINED; what it copies from is host-coherent staging written when it was recorded.
+     */
+    private fun takeInitCommands(): VkCommandBuffer? {
+        val encoder = unwrapVulkanDevice(RenderSystem.getDevice()).createCommandEncoder()
+        val commands = encoder.currentInitCommandBuffer ?: return null
+        encoder.currentInitCommandBuffer = null
+        MemoryStack.stackPush().use { VulkanCommandEncoder.memoryBarrier(commands, it) }
+        VK10.vkEndCommandBuffer(commands)
+        return commands
     }
 
     override fun dispose() {
@@ -121,6 +162,7 @@ internal object VulkanSkijaBackend : SkijaBackend, GpuProfileBackend {
         profiler = null
         barrier?.dispose()
         barrier = null
+        acquired.clear()
         cached?.close()
         cached = null
     }

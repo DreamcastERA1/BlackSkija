@@ -32,7 +32,7 @@ object SkijaCompositor {
 
     /**
      * One UI buffer: we draw into it and blit it in the same frame (0 latency). Ordering between our
-     * write and MC's blit comes from SkijaBackend.orderWriteBeforeRead, so no double buffer is needed.
+     * write and MC's blit comes from SkijaBackend.release, so no double buffer is needed.
      */
     private class Target(val name: String) {
         var texture: GpuTexture? = null
@@ -50,7 +50,6 @@ object SkijaCompositor {
             val tex = UiTexture.create(name, UI_TEXTURE_USAGE, w, h)
             val v = RenderSystem.getDevice().createTextureView(tex)
             val surf = backend.wrapTarget(v)
-            surf.canvas.clear(0)
             texture = tex
             view = v
             surface = surf
@@ -224,15 +223,17 @@ object SkijaCompositor {
                 render(backend, overlayTarget, pose, overlayFrom, Int.MAX_VALUE)
                 overlayTarget.view?.let { addTopmostBlit(guiRenderState, backend, it, window.guiScaledWidth, window.guiScaledHeight) }
             }
-            /* One submit and one barrier for every buffer drawn: each is a queue submission. */
+            /* One submit for every buffer drawn, and release() below hands them back with one barrier: each is a queue submission. */
             if (drawn.isNotEmpty()) {
+                backend.acquire(drawn, WrappedTextureCache.borrowed)
                 backend.submit()
-                backend.orderWriteBeforeRead(drawn)
             }
         } catch (t: Throwable) {
             LOG.error("BlackSkija compositing failed - disabling overlay", t)
             SkijaOverlay.enabled = false
         } finally {
+            backend.release()
+            WrappedTextureCache.borrowed.clear()
             // One batch feeds both buffers, so it is cleared once, after the last range is replayed.
             Skija.discard()
             // Both ranges have been flushed and submitted by now, so nothing pending can still point
@@ -267,6 +268,7 @@ object SkijaCompositor {
                 if (cursor < range.start) Skija.flush(session, cursor, range.start)
                 SkijaProfiler.measure(backend, range.name) {
                     Skija.flush(session, range.start, range.end)
+                    backend.acquire(listOf(view), WrappedTextureCache.borrowed)
                     backend.context.flushAndSubmit(surface, false)
                 }
                 cursor = range.end
