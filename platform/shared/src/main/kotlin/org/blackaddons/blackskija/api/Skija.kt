@@ -16,6 +16,7 @@ import org.blackaddons.blackskija.api.Skija.textGradient
 import org.blackaddons.blackskija.api.Skija.textWidth
 import org.blackaddons.blackskija.api.Skija.wrappedTextBounds
 import org.blackaddons.blackskija.api.draw.SkijaSvg
+import org.blackaddons.blackskija.backend.common.BlurSource
 import org.joml.Matrix3x2fc
 import org.slf4j.LoggerFactory
 import java.awt.Color
@@ -69,6 +70,16 @@ object Skija {
 
     // Blur masks reused across frames, keyed by sigma. Never closed; they live for the process.
     private val blurMaskCache = HashMap<Float, MaskFilter>()
+
+    private val blurPaint by lazy { Paint() }
+    private val blurFilterCache = HashMap<Float, ImageFilter>()
+
+    // Fixes a bug in the blur that would cause parts of the sky to be completely white
+    private val opaqueFilter by lazy {
+        ColorFilter.makeBlend(0xFF000000.toInt(), BlendMode.DST_OVER)
+    }
+
+    internal var blurRequested = false
 
     // A full logical pixel becomes visibly detached when a HUD is scaled up.
     private const val TEXT_SHADOW_OFFSET = 0.5f
@@ -229,6 +240,40 @@ object Skija {
         val r = radius.toFloat()
         val radii = if (roundTop) floatArrayOf(r, r, 0f, 0f) else floatArrayOf(0f, 0f, r, r) // tl, tr, br, bl
         it.drawRRect(RRect.makeComplexXYWH(x.toFloat(), y.toFloat(), w.toFloat(), h.toFloat(), radii), fill(color))
+    }
+
+    fun blurRect(x: Number, y: Number, w: Number, h: Number, radius: Number, sigma: Number = 4) {
+        RenderThread.require("a blur was queued")
+        blurRequested = true
+        enqueue { canvas ->
+            // Take a copy of the world before any of our HUD elements
+            val img = BlurSource.image ?: return@enqueue
+
+            val m = canvas.localToDeviceAsMatrix33.mat
+            val s = maxOf(kotlin.math.hypot(m[0], m[3]), kotlin.math.hypot(m[1], m[4]))
+            val fullW = img.width / s
+            val fullH = img.height / s
+            val sg = sigma.toFloat()
+            val filter = blurFilterCache.getOrPut(sg) { ImageFilter.makeBlur(sg, sg, FilterTileMode.CLAMP) }
+
+            val save = canvas.save()
+            try {
+                canvas.clipRRect(RRect.makeXYWH(x.toFloat(), y.toFloat(), w.toFloat(), h.toFloat(), radius.toFloat()), true)
+                canvas.translate(0f, fullH)
+                canvas.scale(1f, -1f)
+                blurPaint.reset()
+                blurPaint.colorFilter = opaqueFilter
+                blurPaint.imageFilter = filter
+                canvas.drawImageRect(
+                    img, Rect.makeWH(img.width.toFloat(), img.height.toFloat()),
+                    Rect.makeWH(fullW, fullH), SamplingMode.LINEAR, blurPaint, true,
+                )
+                blurPaint.colorFilter = null
+                blurPaint.imageFilter = null
+            } finally {
+                canvas.restoreToCount(save)
+            }
+        }
     }
 
     /** Soft drop shadow in [color]: a rounded box grown by [spread] and blurred by [blur]. Draw it before the element on top. */

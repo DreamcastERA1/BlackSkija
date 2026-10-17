@@ -28,6 +28,7 @@ object SkijaHud {
         val h = 130f
 
         Skija.dropShadow(x, y, w, h, 18, 2, 10, Color(0, 0, 0, 130))
+        Skija.blurRect(x, y, w, h, 10, 4)
         Skija.rect(x, y, w, h, Color(18, 20, 28, 210), 10)
         Skija.hollowRect(x, y, w, h, 1.0, Color(90, 130, 255, 120), 10)
 
