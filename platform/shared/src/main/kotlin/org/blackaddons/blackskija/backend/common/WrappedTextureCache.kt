@@ -26,8 +26,12 @@ internal object WrappedTextureCache {
         }
     }
 
+    /* Views handed out since the compositor last submitted, which the backend readies for Skia first. */
+    val borrowed = LinkedHashSet<GpuTextureView>()
+
     // Image borrowing [view], from cache or freshly wrapped. Owned by the cache; never close it.
     fun get(view: GpuTextureView, premultiplied: Boolean): Image? {
+        borrowed += view
         val key = Key(view, premultiplied)
         cache[key]?.let { cached ->
             if (!view.isClosed) return cached

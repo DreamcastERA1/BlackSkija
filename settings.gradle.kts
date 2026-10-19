@@ -1,8 +1,9 @@
 pluginManagement {
     repositories {
         maven("https://maven.fabricmc.net/") { name = "Fabric" }
-        mavenCentral()
+        maven("https://maven-central.storage-download.googleapis.com/maven2/") { name = "Maven Central mirror" }
         gradlePluginPortal()
+        mavenCentral()
     }
     plugins {
         id("net.fabricmc.fabric-loom") version providers.gradleProperty("loom_version")

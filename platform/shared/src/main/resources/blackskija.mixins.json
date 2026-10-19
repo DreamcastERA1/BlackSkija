@@ -6,9 +6,12 @@
     "GlStateManagerAccessor",
     "GuiEntityCaptureMixin",
     "GuiExtractMixin",
+    "GuiGraphicsExtractorAccessor",
     "GuiItemAtlasAccessor",
+    "GuiItemAtlasMixin",
     "GuiItemCaptureMixin",
-    "GuiRendererMixin"
+    "GuiRendererMixin",
+    "ImmediatelyFastAnimatedItemAtlasMixin"
   ],
   "injectors": {
     "defaultRequire": 1

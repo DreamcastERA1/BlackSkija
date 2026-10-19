@@ -42,7 +42,7 @@ internal object GlSkijaBackend : SkijaBackend, GpuProfileBackend {
      * spark profile, and the reason any Skija content at all cost ~1 ms. Nothing needs it per frame -
      * Skia and Minecraft share the context, so Minecraft's blit already runs after Skia's draws, and the
      * buffer swap flushes. Skia's own bookkeeping behind it (finish callbacks) still gets a regular turn,
-     * every [SUBMIT_EVERY] flushes (a frame has one or two).
+     * every [SUBMIT_EVERY] frames.
      */
     private var flushesSinceSubmit = 0
 

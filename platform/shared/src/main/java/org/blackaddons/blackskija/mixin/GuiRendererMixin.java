@@ -10,11 +10,8 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
-import org.spongepowered.asm.mixin.injection.ModifyArgs;
+import org.spongepowered.asm.mixin.injection.ModifyArg;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
-import org.spongepowered.asm.mixin.injection.invoke.arg.Args;
-
-import java.util.Set;
 
 @Mixin(GuiRenderer.class)
 public class GuiRendererMixin {
@@ -32,28 +29,26 @@ public class GuiRendererMixin {
     @Inject(method = "render", at = @At("HEAD"))
     private void blackskija$composite(CallbackInfo ci) {
         SkijaCompositor.INSTANCE.composite(this.renderState);
+        SkijaItems.INSTANCE.replayAtlasEndFrame();
+        if (SkijaItems.INSTANCE.shouldRebuildAtlases(this.itemAtlas, this.renderState.getItemModelIdentities().size())) {
+            this.invalidateItemAtlas();
+        }
     }
 
     /**
-     * Sizes the item-atlas slot for the largest item on screen, and drops an atlas built at another
-     * size: {@code prepareItemAtlas} keeps any atlas that still has room and ignores the size it is
-     * passed, so without the rebuild a new slot size would only land when the atlas happened to fill.
+     * Builds the item atlas at the slot size for the largest item on screen. Resizing an existing
+     * atlas is decided in {@link #blackskija$composite}, before ImmediatelyFast prepares its animated
+     * atlas: {@code invalidateItemAtlas} drops that one too, which mid-prepare would lose this frame's.
      */
-    @ModifyArgs(
+    @ModifyArg(
         method = "prepareItemElements",
         at = @At(
             value = "INVOKE",
             target = "Lnet/minecraft/client/gui/render/GuiRenderer;prepareItemAtlas(Ljava/util/Set;I)Lnet/minecraft/client/gui/render/GuiItemAtlas;"
-        )
+        ),
+        index = 1
     )
-    private void blackskija$supersampleItemAtlas(Args args) {
-        Set<?> items = args.get(0);
-        int wanted = SkijaItems.INSTANCE.slotTextureSize(args.<Integer>get(1));
-        if (this.itemAtlas != null) {
-            int built = ((GuiItemAtlasAccessor) this.itemAtlas).blackskija$slotTextureSize();
-            int perSide = this.itemAtlas.textureSize() / built;
-            if (SkijaItems.INSTANCE.shouldRebuildAtlas(built, wanted, perSide * perSide, items.size())) this.invalidateItemAtlas();
-        }
-        args.set(1, wanted);
+    private int blackskija$supersampleItemAtlas(int vanillaSlot) {
+        return SkijaItems.INSTANCE.atlasSlotSize(vanillaSlot);
     }
 }

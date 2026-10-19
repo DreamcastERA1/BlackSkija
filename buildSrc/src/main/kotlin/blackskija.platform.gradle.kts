@@ -34,8 +34,9 @@ java {
     withSourcesJar()
 }
 
+/* Loom appends Maven Central after its own repos; listing it earlier makes every Fabric or Loom-made artifact ask Central first, where a 429 fails the build. */
 repositories {
-    mavenCentral()
+    maven("https://maven-central.storage-download.googleapis.com/maven2/") { name = "Maven Central mirror" }
     maven("https://maven.fabricmc.net/") { name = "Fabric" }
 }
 

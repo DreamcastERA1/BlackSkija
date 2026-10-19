@@ -30,3 +30,7 @@ accessible	field	com/mojang/renderpearl/backend/opengl/GlStateManager	writeFbo	I
 # Minecraft skips glUseProgram while lastProgram matches, so after Skija's program it must forget it.
 accessible	class	com/mojang/renderpearl/backend/opengl/GlCommandEncoder
 accessible	field	com/mojang/renderpearl/backend/opengl/GlCommandEncoder	lastProgram	Lcom/mojang/renderpearl/backend/opengl/GlProgram;
+
+# renderpearl sends a new texture's first layout transition only with the frame's own submit, after Skia's;
+# VulkanSkijaBackend.acquire hands that pending init command buffer to the queue ahead of Skia's work.
+accessible	field	com/mojang/renderpearl/backend/vulkan/VulkanCommandEncoder	currentInitCommandBuffer	Lorg/lwjgl/vulkan/VkCommandBuffer;

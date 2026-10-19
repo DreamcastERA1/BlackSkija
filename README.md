@@ -42,7 +42,7 @@ per-version layer. Pick the artifact matching your target.
 |                        | `26.3`                    | `26.1.2`                  |
 |------------------------|---------------------------|---------------------------|
 | GPU backends           | Vulkan + OpenGL           | OpenGL                    |
-| Fabric API             | `0.161.0+26.3`            | `0.155.2+26.1.2`          |
+| Fabric API             | `0.163.0+26.3`            | `0.155.3+26.1.2`          |
 | Fabric Loader          | `>= 0.19.5`               | `>= 0.19.5`               |
 | Fabric Language Kotlin | `>= 1.14.1+kotlin.2.4.20` | `>= 1.14.1+kotlin.2.4.20` |
 | Java                   | 25                        | 25                        |
