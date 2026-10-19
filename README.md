@@ -30,6 +30,9 @@ so you get anti-aliased shapes, gradients, blur, drop shadows, and rich text wit
   0-latency path on Vulkan; on `26.1.2` (which ships no Vulkan backend) it runs on OpenGL.
   Gracefully disables on a GPU API it can't adapt. Most Skija/NanoVG UI mods are GL-only.
 - **Immediate-mode** — call from any render-thread hook, no begin/end; an idle frame costs nothing.
+- **Built for heavy frames** — a `SkijaShape` is geometry built once and drawn in one call (a
+  thousand wires, one draw), and a `SkijaLayer` records a whole run of drawing once and replays it
+  until it changes - panned or zoomed, still sharp, still one op.
 - **Correct depth** — draws issued from a HUD hook composite *below* screens, the pause menu and the
   resource-pack overlay; draws issued afterwards go on top of everything Minecraft drew this frame,
   its text included. No HUD bleeding over open menus.
@@ -123,7 +126,9 @@ a convenience for one managed source — screens compose on top of HUD.)
 
 API surface lives under `org.blackaddons.blackskija.api`:
 
-- `Skija` — shapes, rects, circles, gradients, shadows, clipping, transforms, alpha
+- `Skija` — shapes, rects, circles, gradients, shadows, clipping, transforms, alpha, cached layers
+- `SkijaShape` / `ShapeBuilder` — reusable geometry: lines, curves, rects and rounded polygons as one path
+- `SkijaLayer` — a recorded run of drawing, replayed until invalidated
 - `SkijaProfiler` — opt-in CPU/GPU timings for queued drawing ranges
 - `Gradient` — gradient direction helpers
 - `SkijaFonts` — custom font registration
@@ -156,6 +161,73 @@ The Skija native (~11 MB) isn't in the jar — it's downloaded once at startup f
 into a version-keyed cache, verified against an SHA-256 manifest baked at build time, and loaded
 via the `skija.library.path` system property. Offline with a warm cache works; offline with an
 empty cache leaves the overlay disabled until an online launch (never crashes).
+
+## Shapes: build once, draw in one call
+
+Anything drawn every frame but changing rarely - a node graph's wires, a map outline, a grid - should
+be a `SkijaShape`. Built per frame, it costs a native call per segment and Skia tessellates it again
+every time; kept, it is one draw, and Skia caches its tessellation against the path.
+
+```kotlin
+val wires: SkijaShape = Skija.shape {
+    for (w in graph.wires) {
+        moveTo(w.x0, w.y0)
+        cubicTo(w.c1x, w.c1y, w.c2x, w.c2y, w.x1, w.y1)
+    }
+    rect(0f, 0f, 400f, 300f)                            // boxes and rounded polygons too
+}
+
+Skija.strokeShape(wires, 2, Color.WHITE)                // every frame: one draw for all of them
+Skija.strokeShape(wires, 0, Color.WHITE)                // thickness 0: a one-pixel hairline at any zoom
+Skija.fillShape(boxes, Color.GRAY)
+
+Skija.deleteShape(wires)                                // when its geometry is stale
+```
+
+A shape draws in the current transform, so one built in world units serves every pan and zoom.
+`deleteShape` is deferred to the end of the frame, so draws already queued stay valid.
+
+## Cached layers: record once, replay until it changes
+
+A `SkijaLayer` records everything its content draws into a Skia picture, and replays that picture on
+later frames **without running the content at all** - however many calls it made, a current layer
+costs one queued op.
+
+```kotlin
+private val graphLayer = SkijaLayer()
+
+fun draw() {
+    if (graphChanged) graphLayer.invalidate()           // the next draw records it again
+    Skija.push()
+    Skija.translate(-camera.x * camera.zoom, -camera.y * camera.zoom)
+    Skija.scale(camera.zoom, camera.zoom)
+    Skija.layer(graphLayer, region.x, region.y, region.w, region.h) {   // runs only when stale
+        drawEveryNodeAndWire()
+    }
+    Skija.pop()
+}
+```
+
+The recording is resolution-independent and relative to the transform it was drawn under, so a pan
+or a zoom just replays it under a new transform - still sharp, nothing re-recorded. The box bounds
+the content: Skia skips the replay when it is off screen. What a layer holds is what its content drew
+when it was recorded: the global alpha where it is *drawn* still applies, animated content freezes,
+items and entities are refused, and images wrapped around Minecraft textures must stay out (both
+borrow textures for one frame). `clear()` frees the recording when you are done.
+
+## Migrating from 2.x
+
+3.0.0 replaces the polygon handle with general shapes:
+
+| 2.x | 3.0.0 |
+|---|---|
+| `Skija.createPolygon(points, corner)` | `Skija.shape { polygon(points, corner) }` |
+| `Skija.polygon(path, color)` | `Skija.fillShape(shape, color)` |
+| `Skija.deletePolygon(path)` | `Skija.deleteShape(shape)` |
+| `PolygonPath` | `SkijaShape` |
+
+`Skija.polygon(points, color, corner)` and `Skija.hollowPolygon(...)`, which build on every call,
+are unchanged.
 
 ## Building
 

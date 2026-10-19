@@ -28,6 +28,7 @@ object SkijaProfiler {
 
     fun <T> profile(name: String, block: () -> T): T {
         RenderThread.require("a profile was queued")
+        if (Skija.isCapturing) return block()
         val range = Range(name, Skija.size())
         openRanges.addLast(range)
         return try {
