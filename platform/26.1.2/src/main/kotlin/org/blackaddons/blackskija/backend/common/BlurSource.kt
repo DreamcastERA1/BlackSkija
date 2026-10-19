@@ -15,7 +15,11 @@ object BlurSource {
     private var height = 0
 
     /** Copies Minecraft's main color target into our own private texture */
-    internal fun capture(backend: SkijaBackend, width: Int, height: Int) {
+    internal fun capture(backend: SkijaBackend) {
+        val main = Minecraft.getInstance().mainRenderTarget
+        val color = main.colorTexture ?: return
+        val width = color.getWidth(0)
+        val height = color.getHeight(0)
         if (image == null || this.width != width || this.height != height) {
             close()
             val tex = UiTexture.create("blackskija blur src", 0xf, width, height)
@@ -27,9 +31,8 @@ object BlurSource {
             this.height = height
         }
         val tex = texture ?: return
-        Minecraft.getInstance().gameRenderer
-        val main = Minecraft.getInstance().mainRenderTarget
-        RenderSystem.getDevice().createCommandEncoder().copyTextureToTexture(main.colorTexture!!, tex, 0, 0, 0, 0, 0, width, height)
+        view?.let { WrappedTextureCache.borrowed += it }
+        RenderSystem.getDevice().createCommandEncoder().copyTextureToTexture(color, tex, 0, 0, 0, 0, 0, width, height)
     }
 
     internal fun close() {

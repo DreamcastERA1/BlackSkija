@@ -277,32 +277,27 @@ object Skija {
         it.drawRRect(RRect.makeComplexXYWH(x.toFloat(), y.toFloat(), w.toFloat(), h.toFloat(), radii), fill(color))
     }
 
+    /* TODO: consider a HUD blurRect mode. Only if needed, for now LGTM */
+    /** Blurs the world behind a rounded rect. Only the world. */
     fun blurRect(x: Number, y: Number, w: Number, h: Number, radius: Number, sigma: Number = 4) {
         RenderThread.require("a blur was queued")
         blurRequested = true
         enqueue { canvas ->
             // Take a copy of the world before any of our HUD elements
             val img = BlurSource.image ?: return@enqueue
-
-            val m = canvas.localToDeviceAsMatrix33.mat
-            val s = maxOf(kotlin.math.hypot(m[0], m[3]), kotlin.math.hypot(m[1], m[4]))
-            val fullW = img.width / s
-            val fullH = img.height / s
             val sg = sigma.toFloat()
             val filter = blurFilterCache.getOrPut(sg) { ImageFilter.makeBlur(sg, sg, FilterTileMode.CLAMP) }
 
             val save = canvas.save()
             try {
                 canvas.clipRRect(RRect.makeXYWH(x.toFloat(), y.toFloat(), w.toFloat(), h.toFloat(), radius.toFloat()), true)
-                canvas.translate(0f, fullH)
+                canvas.resetMatrix()
+                canvas.translate(0f, img.height.toFloat())
                 canvas.scale(1f, -1f)
                 blurPaint.reset()
                 blurPaint.colorFilter = opaqueFilter
                 blurPaint.imageFilter = filter
-                canvas.drawImageRect(
-                    img, Rect.makeWH(img.width.toFloat(), img.height.toFloat()),
-                    Rect.makeWH(fullW, fullH), SamplingMode.LINEAR, blurPaint, true,
-                )
+                canvas.drawImage(img, 0f, 0f, blurPaint)
                 blurPaint.colorFilter = null
                 blurPaint.imageFilter = null
             } finally {
