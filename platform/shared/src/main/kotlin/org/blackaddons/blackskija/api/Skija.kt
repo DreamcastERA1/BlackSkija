@@ -39,6 +39,10 @@ import kotlin.math.tan
  * build and reuse native paragraphs in a shared cache, so calling them off-thread can race a
  * frame flush and corrupt the native allocator. Enforced — an off-thread call throws where it is
  * made rather than corrupting a later frame; see [RenderThread].
+ *
+ * Two tools keep a heavy frame cheap: a [SkijaShape] is geometry built once ([shape]) and drawn in
+ * one call ([fillShape], [strokeShape]), and a [SkijaLayer] is a whole run of drawing recorded once
+ * and replayed until it changes ([layer]).
  */
 object Skija {
     private val LOG = LoggerFactory.getLogger("blackskija")
@@ -55,6 +59,22 @@ object Skija {
     // This frame's queued draws, replayed in order at flush and reused across frames. State ops
     // (alpha/push/pop) share the list with draws so per-call alpha and transforms sequence right.
     private val batch = ArrayList<(Canvas) -> Unit>()
+
+    // Where draw() appends: the batch, or the op list of a layer whose content is running. The batch's
+    // own size is what the compositor splits on, so a layer's ops never shift its ranges.
+    private var target: MutableList<(Canvas) -> Unit> = batch
+
+    // Layers whose content is being recorded right now, nested; nonzero forbids frame-borrowed textures.
+    private var capturing = 0
+
+    /** True while a [layer]'s content is being captured rather than queued into the frame. */
+    internal val isCapturing: Boolean get() = capturing > 0
+
+    // Layers recorded this frame, so a frame dropped before its flush can mark them stale again.
+    private val recordedThisFrame = ArrayList<SkijaLayer>()
+
+    // Draws a layer's picture under the global alpha. Its own, so a replay inside a draw can't clobber [paint].
+    private val layerPaint by lazy { Paint() }
 
     /** Default antialiasing state used at the start of every composed range. */
     var antiAlias: Boolean = true
@@ -92,6 +112,15 @@ object Skija {
     internal fun discard() {
         batch.clear()
         SkijaProfiler.discard()
+        // A layer recorded on a frame that was dropped before its flush never made its picture, and
+        // its ops may hold shapes freed at the end of this frame: record it again next time.
+        for (layer in recordedThisFrame) {
+            if (layer.pending != null) {
+                layer.pending = null
+                layer.stale = true
+            }
+        }
+        recordedThisFrame.clear()
     }
 
     internal class FlushSession internal constructor(
@@ -142,13 +171,19 @@ object Skija {
 
     private fun draw(op: (Canvas) -> Unit) {
         RenderThread.require("a draw was queued")
-        batch.add(op)
+        target.add(op)
     }
 
-    // For SkijaItems, which draws straight to the canvas at replay time rather than queuing more Skija calls.
+    // For SkijaItems and SkijaEntity, which draw straight to the canvas at replay time rather than
+    // queuing more Skija calls. Both borrow Minecraft textures for this one frame, which a layer's
+    // picture would outlive.
     internal fun enqueue(op: (Canvas) -> Unit) {
         RenderThread.require("a draw was queued")
-        batch.add(op)
+        check(capturing == 0) {
+            "BlackSkija: items and entities cannot be drawn into a SkijaLayer - they borrow Minecraft " +
+                "textures for one frame, and the layer would replay them after they are freed"
+        }
+        target.add(op)
     }
 
     fun push() = draw {
@@ -318,6 +353,9 @@ object Skija {
      * One shape and one antialiased outline for an outline a rect cannot make: an L, a notch, a
      * speech bubble tail. Built from overlapping rects instead, each rect antialiases its own edge
      * and the seams between them stay visible against the background.
+     *
+     * Built on every call; for a polygon drawn every frame, build a [SkijaShape] once instead
+     * ([shape] with [ShapeBuilder.polygon]).
      */
     fun polygon(points: FloatArray, color: Color, corner: Number = 0) {
         requirePolygon(points)
@@ -329,33 +367,6 @@ object Skija {
         }
     }
 
-    /**
-     * Builds a reusable native path for a stable polygon. Pair it with [deletePolygon] when its
-     * geometry is no longer drawn; deferred drawing makes closing it immediately unsafe.
-     */
-    fun createPolygon(points: FloatArray, corner: Number = 0): PolygonPath {
-        requirePolygon(points)
-        RenderThread.require("a polygon path was created")
-        return PolygonPath(polygonPath(points, corner.toFloat()))
-    }
-
-    /** Draws a [PolygonPath] made by [createPolygon]. */
-    fun polygon(path: PolygonPath, color: Color) = draw {
-        check(!path.deleted) { "BlackSkija: a deleted polygon path was drawn" }
-        it.drawPath(path.native, fill(color))
-    }
-
-    /**
-     * Forgets a reusable [PolygonPath] after its final draw. Its native handle survives through
-     * the current flush so queued draws cannot observe freed memory.
-     */
-    fun deletePolygon(path: PolygonPath) {
-        RenderThread.require("a polygon path was deleted")
-        check(!path.deleted) { "BlackSkija: a polygon path was deleted twice" }
-        path.deleted = true
-        DeferredFree.later(path.native)
-    }
-
     /** Outline of [polygon], [thickness] pixels wide. */
     fun hollowPolygon(points: FloatArray, thickness: Number, color: Color, corner: Number = 0) {
         requirePolygon(points)
@@ -365,6 +376,142 @@ object Skija {
             val path = polygonPath(points, corner.toFloat())
             it.drawPath(path, paint)
             path.close()
+        }
+    }
+
+    // One native builder for every shape: building is render-thread only, so one is never shared.
+    private val shapeBuilder by lazy { PathBuilder() }
+
+    /**
+     * Builds a [SkijaShape] from what [build] records - lines, curves, rects, polygons, as many
+     * contours as it likes. Keep the shape and draw it every frame; [deleteShape] it once stale.
+     */
+    fun shape(build: ShapeBuilder.() -> Unit): SkijaShape {
+        RenderThread.require("a shape was built")
+        try {
+            ShapeBuilder(shapeBuilder).build()
+            return SkijaShape(shapeBuilder.detach())
+        } catch (t: Throwable) {
+            // A half-recorded contour must not leak into the next shape.
+            shapeBuilder.reset()
+            throw t
+        }
+    }
+
+    /** Fills every closed contour and rectangle of [shape] in the current transform. */
+    fun fillShape(shape: SkijaShape, color: Color) {
+        requireAlive(shape)
+        draw { it.drawPath(shape.native, fill(color)) }
+    }
+
+    /**
+     * Strokes every contour of [shape] [thickness] units wide in the current transform, with round caps
+     * and joins. A [thickness] of 0 is a hairline: one device pixel wide whatever the transform, the
+     * cheapest stroke Skia has - the right one for thin lines in a zoomed-out view.
+     */
+    fun strokeShape(shape: SkijaShape, thickness: Number, color: Color) {
+        requireAlive(shape)
+        val w = thickness.toFloat().coerceAtLeast(0f)
+        draw {
+            val paint = stroke(color, w)
+            paint.strokeCap = PaintStrokeCap.ROUND
+            paint.strokeJoin = PaintStrokeJoin.ROUND
+            it.drawPath(shape.native, paint)
+        }
+    }
+
+    /**
+     * Gives [shape] back after its final draw. Its native path survives until the current frame has
+     * been flushed, so draws already queued this frame still read valid memory and still draw.
+     */
+    fun deleteShape(shape: SkijaShape) {
+        RenderThread.require("a shape was deleted")
+        check(!shape.deleted) { "BlackSkija: a shape was deleted twice" }
+        shape.deleted = true
+        DeferredFree.later(shape.native)
+    }
+
+    private fun requireAlive(shape: SkijaShape) = check(!shape.deleted) { "BlackSkija: a deleted shape was drawn" }
+
+    /**
+     * Draws [layer]: runs [content] to record it if it is stale (new, [SkijaLayer.invalidate]d or
+     * [SkijaLayer.clear]ed), otherwise replays what was recorded without running [content] at all.
+     *
+     * [content] draws through this API as usual, in the transform in force here; the recording keeps
+     * those draws relative to it, so the layer can be drawn again under another transform - panned,
+     * zoomed - and stay sharp. ([x], [y], [w], [h]) bounds the content in those same units: Skia
+     * skips the whole replay when the box is off screen, and may cut off what is drawn outside it.
+     * See [SkijaLayer] for what a recording can and cannot hold.
+     */
+    fun layer(layer: SkijaLayer, x: Number, y: Number, w: Number, h: Number, content: () -> Unit) {
+        RenderThread.require("a layer was drawn")
+        if (layer.stale) {
+            val ops = ArrayList<(Canvas) -> Unit>()
+            val outer = target
+            target = ops
+            capturing++
+            try {
+                content()
+            } finally {
+                target = outer
+                capturing--
+            }
+            layer.pending = ops
+            layer.bounds = Rect.makeXYWH(x.toFloat(), y.toFloat(), w.toFloat(), h.toFloat())
+            layer.stale = false
+            layer.recordings++
+            recordedThisFrame += layer
+        }
+        draw { replayLayer(it, layer) }
+    }
+
+    private fun replayLayer(canvas: Canvas, layer: SkijaLayer) {
+        layer.pending?.let { record(layer, it) }
+        val picture = layer.picture ?: return
+        if (alpha >= 1f) {
+            canvas.drawPicture(picture)
+            return
+        }
+        layerPaint.reset()
+        layerPaint.alpha = (alpha * 255).roundToInt().coerceIn(0, 255)
+        canvas.drawPicture(picture, null, layerPaint)
+    }
+
+    /**
+     * Turns a layer's ops into its picture, on the frame they were queued - at replay, like every
+     * other op, so text and shapes resolve exactly as they would drawn directly.
+     *
+     * The ops run on a fresh canvas from a clean slate: alpha 1 (the alpha in force where the layer is
+     * drawn is applied to the whole picture instead) and no saves of the frame's own, which is what
+     * lets one recording be replayed into any later frame.
+     */
+    private fun record(layer: SkijaLayer, ops: List<(Canvas) -> Unit>) {
+        layer.pending = null
+        val outerAlpha = alpha
+        val outerAlphaStack = ArrayList(alphaStack)
+        val outerSaveDepth = saveDepth
+        alpha = 1f
+        alphaStack.clear()
+        saveDepth = 0
+        try {
+            PictureRecorder().use { recorder ->
+                val canvas = recorder.beginRecording(layer.bounds)
+                for (op in ops) op(canvas)
+                if (saveDepth != 0) {
+                    LOG.warn("BlackSkija: unbalanced render state in a layer (saveDepth={}) - auto-unwound", saveDepth)
+                    while (saveDepth > 0) {
+                        canvas.restore()
+                        saveDepth--
+                    }
+                }
+                layer.picture?.let(DeferredFree::later)
+                layer.picture = recorder.finishRecordingAsPicture()
+            }
+        } finally {
+            alpha = outerAlpha
+            alphaStack.clear()
+            alphaStack.addAll(outerAlphaStack)
+            saveDepth = outerSaveDepth
         }
     }
 
@@ -443,7 +590,7 @@ object Skija {
         it.restoreToCount(layer)
     }
 
-    private fun requirePolygon(points: FloatArray) = require(points.size >= 6 && points.size % 2 == 0) {
+    internal fun requirePolygon(points: FloatArray) = require(points.size >= 6 && points.size % 2 == 0) {
         "BlackSkija: a polygon takes interleaved x, y for three vertices or more, got ${points.size} floats"
     }
 
@@ -454,7 +601,17 @@ object Skija {
 
     private fun polygonPath(points: FloatArray, corner: Float): Path {
         if (corner <= 0f) return Path.makePolygon(vertices(points), true)
+        return PathBuilder().use { builder ->
+            appendPolygon(builder, points, corner)
+            builder.detach()
+        }
+    }
 
+    internal fun appendPolygon(builder: PathBuilder, points: FloatArray, corner: Float) {
+        if (corner <= 0f) {
+            builder.addPolygon(points, true)
+            return
+        }
         val vertices = vertices(points)
         val corners = Array(vertices.size) { index ->
             roundedCorner(
@@ -464,20 +621,17 @@ object Skija {
                 corner,
             )
         }
-        return PathBuilder().use { builder ->
-            // closePath only joins the last edge to this point; start at the first arc's tangent
-            // so it stays curved too instead of leaving one sharp vertex.
-            builder.moveTo(corners[0].start)
-            for (index in vertices.indices) {
-                val vertex = vertices[index]
-                val next = vertices[(index + 1) % vertices.size]
-                val radius = corners[index].radius
-                if (radius > 0f) builder.tangentArcTo(vertex, next, radius)
-                else builder.lineTo(vertex)
-            }
-            builder.closePath()
-            builder.detach()
+        // closePath only joins the last edge to this point; start at the first arc's tangent
+        // so it stays curved too instead of leaving one sharp vertex.
+        builder.moveTo(corners[0].start)
+        for (index in vertices.indices) {
+            val vertex = vertices[index]
+            val next = vertices[(index + 1) % vertices.size]
+            val radius = corners[index].radius
+            if (radius > 0f) builder.tangentArcTo(vertex, next, radius)
+            else builder.lineTo(vertex)
         }
+        builder.closePath()
     }
 
     private fun roundedCorner(previous: Point, vertex: Point, next: Point, requestedRadius: Float): RoundedCorner {

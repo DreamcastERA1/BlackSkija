@@ -6,12 +6,15 @@ import net.minecraft.world.item.ItemStack
 import net.minecraft.world.item.Items
 import org.blackaddons.blackskija.api.Gradient
 import org.blackaddons.blackskija.api.Skija
+import org.blackaddons.blackskija.api.SkijaLayer
+import org.blackaddons.blackskija.api.SkijaShape
 import org.blackaddons.blackskija.api.draw.*
 import org.blackaddons.blackskija.backend.common.SkijaBackends
 import java.awt.Color
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
+import kotlin.math.sqrt
 
 object SkijaDemo {
 
@@ -63,7 +66,7 @@ object SkijaDemo {
 
         SkijaImages.drawMcSprite(BLOCK_ATLAS, STONE_SPRITE, px + 14, py + ph - 22, 16, 16)
         SkijaText.draw(
-            "rect · gradient · line · rotate · scissor · alpha · text · item · polygon · vector · animation",
+            "rect · gradient · line · rotate · scissor · alpha · text · item · polygon · vector · animation · shape · layer",
             px + pw / 2, py + ph - 17, MUTED, 9f, align = Skija.Align.CENTER, shadow = true,
         )
 
@@ -73,7 +76,7 @@ object SkijaDemo {
         val bw = pw - pad * 2
         val bh = ph - titleH - footerH - pad * 2
         val cols = 4
-        val rows = 4
+        val rows = 5
         val gap = 14f
         val cw = (bw - gap * (cols - 1)) / cols
         val ch = (bh - gap * (rows - 1)) / rows
@@ -225,7 +228,54 @@ object SkijaDemo {
             Skija.lottie(SkijaLottie.resource(SPINNER_LOTTIE), ms, x + 12, cy, side, side)
             SkijaImages.animated(ORBIT_GIF, gifBytes).draw(ms, x + w - side - 12, cy, side, side, radius = 8)
         }
+
+        cell(0, 4, "shape") { x, y, w, h ->
+            // Thirty curves built once into one shape, then drawn as one call every frame.
+            val fan = fanShape(w - 28, h - 34)
+            Skija.push()
+            Skija.translate(x + 14, y + 12)
+            Skija.strokeShape(fan, 1.2, ACCENT)
+            Skija.pop()
+        }
+
+        cell(1, 4, "layer") { x, y, w, h ->
+            // Two thousand dots recorded once and replayed: an idle frame runs none of the loop below.
+            // Re-recorded every two seconds, so the counter shows it is the cache drawing, not the loop.
+            if (layerRecordedAt < 0 || t - layerRecordedAt > 2.0) {
+                dots.invalidate()
+                layerRecordedAt = t
+            }
+            val hue = (t / 2.0).toInt() % 3
+            Skija.layer(dots, x, y, w, h) {
+                val color = listOf(ACCENT, Color(120, 210, 150), Color(255, 170, 90))[hue]
+                for (i in 0 until 2000) {
+                    val a = i * 0.618 * 2 * PI
+                    val r = sqrt(i / 2000.0)
+                    Skija.rect(
+                        x + w / 2 + (cos(a) * r * (w / 2 - 14)).toFloat(),
+                        y + (h - 16) / 2 + (sin(a) * r * ((h - 16) / 2 - 8)).toFloat(),
+                        1.2f, 1.2f, color,
+                    )
+                }
+            }
+            SkijaText.draw("recorded ${dots.recordings}×", x + 8, y + 6, MUTED, 7f)
+        }
     }
+
+    // Built on first use and kept: the cell size is fixed for the screen's lifetime in practice, and
+    // a stale size only means the fan is a little off its cell until the demo is reopened.
+    private var fan: SkijaShape? = null
+
+    private fun fanShape(w: Float, h: Float): SkijaShape = fan ?: Skija.shape {
+        for (i in 0 until 30) {
+            val ty = h * i / 29f
+            moveTo(0f, h / 2)
+            cubicTo(w * 0.5f, h / 2, w * 0.5f, ty, w, ty)
+        }
+    }.also { fan = it }
+
+    private val dots = SkijaLayer()
+    private var layerRecordedAt = -1.0
 
     // Read on the first frame that draws it, then held: SkijaImages only looks at the bytes on a
     // cache miss, but they would still be re-read off the classpath every frame to be handed over.
