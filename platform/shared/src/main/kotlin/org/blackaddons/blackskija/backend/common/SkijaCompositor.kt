@@ -90,6 +90,15 @@ object SkijaCompositor {
 
     private var warmed = false
 
+    /*
+     * True while Minecraft extracts the GUI. A `GuiRenderer.render` in that window is another mod
+     * flushing a partial frame into its own target (Gnetum caches the HUD that way); the queue belongs
+     * to the frame's real render, and a second composite would redraw buffers the first one's blits
+     * still read on Vulkan. Set from GuiExtractMixin (Java), so public despite being internal use.
+     */
+    @JvmField
+    var extracting = false
+
     /**
      * Records where the HUD's draws end and reserves their place in the GUI's depth order, by
      * registering the blit into the layer that is current *right now* — while `Gui` has extracted

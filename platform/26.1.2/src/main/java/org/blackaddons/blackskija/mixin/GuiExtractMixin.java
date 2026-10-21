@@ -43,4 +43,14 @@ public class GuiExtractMixin {
     private void blackskija$markHudLayer(CallbackInfo ci) {
         SkijaCompositor.INSTANCE.markHudLayer(this.gameRenderState.guiRenderState);
     }
+
+    @Inject(method = "extractGui", at = @At("HEAD"))
+    private void blackskija$beginExtract(CallbackInfo ci) {
+        SkijaCompositor.extracting = true;
+    }
+
+    @Inject(method = "extractGui", at = @At("RETURN"))
+    private void blackskija$endExtract(CallbackInfo ci) {
+        SkijaCompositor.extracting = false;
+    }
 }

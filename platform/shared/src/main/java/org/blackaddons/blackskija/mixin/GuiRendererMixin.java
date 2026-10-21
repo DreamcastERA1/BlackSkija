@@ -28,6 +28,7 @@ public class GuiRendererMixin {
 
     @Inject(method = "render", at = @At("HEAD"))
     private void blackskija$composite(CallbackInfo ci) {
+        if (SkijaCompositor.extracting) return;
         SkijaCompositor.INSTANCE.composite(this.renderState);
         SkijaItems.INSTANCE.replayAtlasEndFrame();
         if (SkijaItems.INSTANCE.shouldRebuildAtlases(this.itemAtlas, this.renderState.getItemModelIdentities().size())) {
