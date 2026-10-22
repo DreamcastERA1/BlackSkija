@@ -7,6 +7,7 @@ import org.blackaddons.blackskija.backend.common.GpuProfileBackend
 import org.blackaddons.blackskija.backend.common.SkijaBackend
 import org.lwjgl.opengl.GL11C
 import org.lwjgl.opengl.GL30C
+import java.util.IdentityHashMap
 
 internal object GlSkijaBackend : SkijaBackend, GpuProfileBackend {
 
@@ -20,9 +21,8 @@ internal object GlSkijaBackend : SkijaBackend, GpuProfileBackend {
     override val context: DirectContext
         get() = cached ?: DirectContext.makeGL().also { cached = it }
 
-    // FBOs wrapping our UI targets. On resize the new one is created before the old is released, so
-    // keep a small ring (2) and delete the oldest past that.
-    private val fbos = ArrayDeque<Int>()
+    // The FBO behind each wrapped target, freed with that target: a count cap deletes FBOs still in use.
+    private val fbos = IdentityHashMap<Surface, Int>()
 
     override val flipBlitU = false
     override val flipBlitV = true
@@ -65,14 +65,16 @@ internal object GlSkijaBackend : SkijaBackend, GpuProfileBackend {
         GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, fbo)
         GL30C.glFramebufferTexture2D(GL30C.GL_FRAMEBUFFER, GL30C.GL_COLOR_ATTACHMENT0, GL11C.GL_TEXTURE_2D, glId, 0)
         GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, prevFbo)
-        fbos.addLast(fbo)
-        while (fbos.size > 2) GL30C.glDeleteFramebuffers(fbos.removeFirst())
 
         val rt = BackendRenderTarget.makeGL(w, h, 0, 0, fbo, GL_RGBA8)
 
         return Surface.wrapBackendRenderTarget(
             context, rt, SurfaceOrigin.BOTTOM_LEFT, ColorType.RGBA_8888, null,
-        )
+        ).also { fbos[it] = fbo }
+    }
+
+    override fun releaseTarget(surface: Surface) {
+        fbos.remove(surface)?.let(GL30C::glDeleteFramebuffers)
     }
 
     override fun wrapTexture(view: GpuTextureView, premultiplied: Boolean): Image? {
@@ -89,7 +91,8 @@ internal object GlSkijaBackend : SkijaBackend, GpuProfileBackend {
 
     override fun dispose() {
         gpuProfiler.dispose()
-        while (fbos.isNotEmpty()) GL30C.glDeleteFramebuffers(fbos.removeFirst())
+        fbos.values.forEach(GL30C::glDeleteFramebuffers)
+        fbos.clear()
         cached?.close()
         cached = null
     }

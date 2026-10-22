@@ -30,6 +30,10 @@ internal interface SkijaBackend {
     val flipBlitV: Boolean get() = false
 
     fun wrapTarget(view: GpuTextureView): Surface
+
+    /* Frees what [wrapTarget] made for [surface]. Call it before closing the surface. */
+    fun releaseTarget(surface: Surface) {}
+
     fun wrapTexture(view: GpuTextureView, premultiplied: Boolean = false): Image?
     fun dispose()
 }

@@ -58,6 +58,7 @@ object SkijaCompositor {
         }
 
         fun close() {
+            surface?.let { SkijaBackends.active?.releaseTarget(it) }
             surface?.close()
             view?.close()
             texture?.close()
