@@ -22,7 +22,7 @@ fun prop(name: String): String = providers.gradleProperty(name).get()
 group = prop("maven_group")
 version = prop("mod_version")
 
-// Both 26.1.2 and 26.3 are Java 25 (class-file major 69).
+// 26.1.2, 26.2 and 26.3 are all Java 25 (class-file major 69).
 val targetJava = 25
 
 base {
