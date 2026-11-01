@@ -20,6 +20,8 @@ import org.blackaddons.blackskija.backend.common.BlurSource
 import org.joml.Matrix3x2fc
 import org.slf4j.LoggerFactory
 import java.awt.Color
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import kotlin.math.PI
 import kotlin.math.acos
 import kotlin.math.hypot
@@ -657,6 +659,54 @@ object Skija {
      * must match [colors] in length, each in `0..1` ascending; null spaces them evenly. [gradient]
      * picks the axis.
      */
+    /**
+     * Fills a rounded rect with an SkSL shader, `half4 main(float2 p)` with `p` in the rect's own
+     * coordinates. [uniforms] are set by name, each array as long as that uniform's float count; a missing
+     * one stays zero. The source is compiled once and cached by its text, so pass a constant. A source that
+     * does not compile logs once and draws nothing.
+     */
+    fun shaderRect(
+        x: Number, y: Number, w: Number, h: Number,
+        sksl: String, uniforms: Map<String, FloatArray>, radius: Number = 0,
+    ) {
+        val rect = RRect.makeXYWH(x.toFloat(), y.toFloat(), w.toFloat(), h.toFloat(), radius.toFloat())
+        // Copied now: the caller may reuse its arrays before the frame replays.
+        val values = uniforms.mapValues { it.value.copyOf() }
+        draw {
+            val effect = runtimeEffect(sksl) ?: return@draw
+            val data = Data.makeFromBytes(packUniforms(effect, values))
+            val shader = effect.makeShader(data, arrayOf<Shader>())
+            paint.reset()
+            paint.isAntiAlias = activeAntiAlias
+            paint.shader = shader
+            paint.alphaf = alpha
+            it.drawRRect(rect, paint)
+            paint.shader = null
+            shader.close()
+            data.close()
+        }
+    }
+
+    // Null marks a source that failed to compile, so a broken shader logs once instead of every frame.
+    private val runtimeEffects = HashMap<String, RuntimeEffect?>()
+
+    private fun runtimeEffect(sksl: String): RuntimeEffect? = runtimeEffects.getOrPut(sksl) {
+        runCatching { RuntimeEffect.makeForShader(sksl) }
+            .onFailure { LOG.error("BlackSkija: SkSL shader failed to compile - not drawn", it) }
+            .getOrNull()
+    }
+
+    // Skia lays uniforms out itself; the offsets come from the compiled effect, never from declaration order.
+    private fun packUniforms(effect: RuntimeEffect, values: Map<String, FloatArray>): ByteArray {
+        val buffer = ByteBuffer.allocate(effect.uniformSize).order(ByteOrder.nativeOrder())
+        for (info in effect.uniforms) {
+            val floats = values[info.name] ?: continue
+            buffer.position(info.offset)
+            floats.take(info.sizeInBytes / Float.SIZE_BYTES).forEach(buffer::putFloat)
+        }
+        return buffer.array()
+    }
+
     fun gradientRect(
         x: Number, y: Number, w: Number, h: Number,
         colors: List<Color>, gradient: Gradient, radius: Number, stops: FloatArray? = null,

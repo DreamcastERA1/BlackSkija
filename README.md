@@ -18,6 +18,8 @@ so you get anti-aliased shapes, gradients, blur, drop shadows, and rich text wit
 - **Anti-aliased 2D** — rects, rounded / half-rounded rects, circles, lines, polygons with
   rounded corners, multi-stop gradients, Gaussian drop shadows, clipping, transforms, per-call
   alpha.
+- **Shaders** — fill any rounded rect with your own SkSL (`shaderRect`), uniforms by name,
+  compiled once and cached.
 - **Vectors and animation** — SVG path data drawn in your own color (an icon set needs no PNGs),
   whole SVG documents scaled into a box, animated GIF / WebP a frame at a time, and Lottie
   rendered by Skia itself.
