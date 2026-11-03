@@ -2,6 +2,7 @@
   "required": true,
   "minVersion": "0.8",
   "package": "org.blackaddons.blackskija.mixin",
+  "plugin": "org.blackaddons.blackskija.init.BlackSkijaMixinPlugin",
   "client": [
     "GlStateManagerAccessor",
     "GuiEntityCaptureMixin",
@@ -10,8 +11,7 @@
     "GuiItemAtlasAccessor",
     "GuiItemAtlasMixin",
     "GuiItemCaptureMixin",
-    "GuiRendererMixin",
-    "ImmediatelyFastAnimatedItemAtlasMixin"
+    "GuiRendererMixin"
   ],
   "injectors": {
     "defaultRequire": 1
