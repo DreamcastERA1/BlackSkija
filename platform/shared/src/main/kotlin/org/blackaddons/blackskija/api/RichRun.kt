@@ -1,13 +1,18 @@
 package org.blackaddons.blackskija.api
 
 import io.github.humbleui.skija.Image
+import java.awt.Color
 
 /**
  * One run of [Skija.richText]: text, or a picture that sits in the line like a glyph and wraps with it -
  * an emoji, most of the time.
  */
 sealed interface RichRun {
-    data class Text(val text: String) : RichRun
+    /**
+     * [color] overrides the paragraph's color for this run (null keeps it); [scale] is its size in ems of the
+     * paragraph's, for an aside such as "(edited)" set smaller beside the text it follows.
+     */
+    data class Text(val text: String, val color: Color? = null, val scale: Float = 1f) : RichRun
 
     /**
      * [image], or the `srcX, srcY, srcW, srcH` part of it (a cell of an atlas), drawn [scale] ems square

@@ -89,6 +89,8 @@ internal object TextLayoutCache {
 
     private val paint = Paint()
 
+    private val runPaint = Paint()
+
     // Metrics depend only on the face and the size, so they cache far more coarsely than layouts.
     private val metricsCache = HashMap<Pair<String, Float>, FloatArray>()
 
@@ -174,13 +176,13 @@ internal object TextLayoutCache {
 
         val paragraph = if (e.paintedFrame == frame && (!e.solid || e.lastArgb != argb)) {
             buildRich(runs, size, family, lineHeight).also {
-                it.updateForegroundPaint(0, length, paint)
+                paintRich(it, runs, length, antiAlias)
                 it.layout(width)
                 evicted += it
             }
         } else {
             if (!e.solid || e.lastArgb != argb) {
-                e.paragraph.updateForegroundPaint(0, length, paint)
+                paintRich(e.paragraph, runs, length, antiAlias)
                 e.paragraph.layout(width)
                 e.lastArgb = argb
                 e.solid = true
@@ -202,6 +204,22 @@ internal object TextLayoutCache {
         }
     }
 
+    // The paragraph's color over everything, then each colored run's own over its range.
+    private fun paintRich(paragraph: Paragraph, runs: List<RichRun>, length: Int, antiAlias: Boolean) {
+        paragraph.updateForegroundPaint(0, length, paint)
+        var start = 0
+        for (run in runs) {
+            val end = start + if (run is RichRun.Text) run.text.length else 1
+            if (run is RichRun.Text && run.color != null) {
+                runPaint.reset()
+                runPaint.isAntiAlias = antiAlias
+                runPaint.color = run.color.rgb
+                paragraph.updateForegroundPaint(start, end, runPaint)
+            }
+            start = end
+        }
+    }
+
     /** `[longestLine, height]` of [runs] wrapped at [maxWidth]. */
     fun measureRich(runs: List<RichRun>, maxWidth: Float, size: Float, family: String, lineHeight: Float): FloatArray {
         val p = richEntry(runs, size, family, maxWidth, lineHeight).paragraph
@@ -214,7 +232,8 @@ internal object TextLayoutCache {
 
     private fun richEntry(runs: List<RichRun>, size: Float, family: String, width: Float, lineHeight: Float): Entry {
         RenderThread.require("rich text was measured or drawn")
-        val shape = runs.map { if (it is RichRun.Text) it.text else (it as RichRun.Picture).scale }
+        // A run's color is part of the shape: the cached paragraph keeps it between recolors.
+        val shape = runs.map { if (it is RichRun.Text) it else (it as RichRun.Picture).scale }
         val key = RichKey(shape, size, family, width, lineHeight)
         richCache[key]?.let { return it }
         val p = buildRich(runs, size, family, lineHeight)
@@ -227,8 +246,15 @@ internal object TextLayoutCache {
         if (lineHeight != 1f) style.setHeight(lineHeight)
         val paraStyle = ParagraphStyle().setTextStyle(style)
         val builder = ParagraphBuilder(paraStyle, SkijaFonts.collection)
+        val asides = ArrayList<TextStyle>()
         for (run in runs) when (run) {
-            is RichRun.Text -> builder.addText(run.text)
+            is RichRun.Text -> if (run.scale == 1f) builder.addText(run.text) else {
+                val aside = textStyle(size * run.scale, family).also(asides::add)
+                if (lineHeight != 1f) aside.setHeight(lineHeight)
+                builder.pushStyle(aside)
+                builder.addText(run.text)
+                builder.popStyle()
+            }
             is RichRun.Picture -> {
                 val side = size * run.scale
                 builder.addPlaceholder(
@@ -240,6 +266,7 @@ internal object TextLayoutCache {
         builder.close()
         paraStyle.close()
         style.close()
+        asides.forEach(TextStyle::close)
         return p
     }
 
