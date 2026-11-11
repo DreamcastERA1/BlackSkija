@@ -6,6 +6,7 @@ repositories {
     maven("https://maven-central.storage-download.googleapis.com/maven2/") { name = "Maven Central mirror" }
     gradlePluginPortal()
     mavenCentral()
+    maven("https://maven.fabricmc.net/") { name = "Fabric" }
 }
 
 // buildSrc is its own Gradle build, so `providers.gradleProperty` reads *its* properties, not the
@@ -17,7 +18,15 @@ val kotlinVersion: String = file("../gradle.properties").readLines()
     ?.trim()
     ?: error("kotlin_version missing from the root gradle.properties")
 
+val loomVersion: String = file("../gradle.properties").readLines()
+    .firstOrNull { it.startsWith("loom_version=") }
+    ?.substringAfter('=')
+    ?.trim()
+    ?: error("loom_version missing from the root gradle.properties")
+
 dependencies {
     // The Kotlin plugin must be on this classpath for a precompiled script plugin to apply kotlin("jvm").
     implementation("org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlinVersion")
+    // blackskija.platform applies Loom, so every platform builds with the one `loom_version`.
+    implementation("net.fabricmc:fabric-loom:$loomVersion")
 }

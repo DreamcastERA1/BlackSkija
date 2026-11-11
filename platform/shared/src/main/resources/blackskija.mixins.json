@@ -4,7 +4,6 @@
   "package": "org.blackaddons.blackskija.mixin",
   "plugin": "org.blackaddons.blackskija.init.BlackSkijaMixinPlugin",
   "client": [
-    "GlStateManagerAccessor",
     "GuiEntityCaptureMixin",
     "GuiExtractMixin",
     "GuiGraphicsExtractorAccessor",

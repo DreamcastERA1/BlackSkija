@@ -2,13 +2,13 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 import java.security.MessageDigest
 import java.util.zip.ZipFile
+import net.fabricmc.loom.api.LoomGradleExtensionAPI
 
 /**
- * The version-neutral half of every BlackSkija platform: Java 25 toolchain, the shared source tree,
- * the Skija dependency, and the native-fingerprint manifest. Loom and everything version-specific
- * (Minecraft/Fabric coordinates, access widener, run configs) is applied by the platform module —
- * `pluginManagement` in settings.gradle.kts does not reach buildSrc's classpath, so a precompiled
- * script plugin cannot apply Loom itself.
+ * Every BlackSkija platform: Java 25 toolchain, the shared source tree, the Skija dependency, the
+ * native-fingerprint manifest, and last Loom with the Minecraft/Fabric coordinates, access widener and
+ * run configs. The folder name is the Minecraft version and picks the `mc<version>_*` properties, so a
+ * platform's own build file only applies this.
  */
 
 plugins {
@@ -22,7 +22,7 @@ fun prop(name: String): String = providers.gradleProperty(name).get()
 group = prop("maven_group")
 version = prop("mod_version")
 
-// 26.1.2, 26.2 and 26.3 are all Java 25 (class-file major 69).
+// 26.2 and 26.3 are both Java 25 (class-file major 69).
 val targetJava = 25
 
 base {
@@ -141,4 +141,67 @@ publishing {
             from(components["java"])
         }
     }
+}
+
+/* Applied last, so the repositories above stay ahead of the ones Loom adds. */
+apply(plugin = "net.fabricmc.fabric-loom")
+
+val mc = project.name
+fun mcProp(name: String): String = prop("mc${mc.replace(".", "")}_$name")
+
+val minecraftVersion = mcProp("minecraft_version")
+val loaderVersion = mcProp("loader_version")
+val fabricKotlinVersion = mcProp("fabric_kotlin_version")
+val fabricApiVersion = mcProp("fabric_api_version")
+val skijaVersion = prop("skija_version")
+val typesVersion = prop("types_version")
+
+configure<LoomGradleExtensionAPI> {
+    accessWidenerPath = file("src/main/resources/blackskija.accesswidener")
+
+    // Portable client run configs that force the GPU backend via a launch arg. Both editions run the
+    // dev showcase (blackskija.demo), which BlackskijaClient gates to this project's own dev only.
+    runs {
+        named("client") {
+            systemProperties.put("blackskija.demo", "true")
+        }
+        create("clientVulkan") {
+            client()
+            displayName = "Minecraft Client ($mc · Vulkan)"
+            programArguments.addAll("--graphicsBackend", "vulkan")
+            systemProperties.put("blackskija.demo", "true")
+        }
+        create("clientOpenGl") {
+            client()
+            displayName = "Minecraft Client ($mc · OpenGL)"
+            programArguments.addAll("--graphicsBackend", "opengl")
+            systemProperties.put("blackskija.demo", "true")
+        }
+    }
+}
+
+dependencies {
+    // Minecraft ships deobfuscated → plain `minecraft(...)`/`implementation(...)`, no mappings/modImpl.
+    "minecraft"("com.mojang:minecraft:$minecraftVersion")
+    implementation("net.fabricmc:fabric-loader:$loaderVersion")
+    implementation("net.fabricmc.fabric-api:fabric-api:$fabricApiVersion")
+    implementation("net.fabricmc:fabric-language-kotlin:$fabricKotlinVersion")
+
+    // JiJ: bundle skija-shared and its types dep so consumers don't install them; the native is
+    // fetched at runtime by SkijaNatives against the fingerprint manifest.
+    "include"("io.github.humbleui:skija-shared:$skijaVersion")
+    "include"("io.github.humbleui:types:$typesVersion")
+}
+
+tasks.processResources {
+    val props = mapOf(
+        "version" to version,
+        "minecraft_version" to minecraftVersion,
+        "loader_version" to loaderVersion,
+        "kotlin_loader_version" to fabricKotlinVersion,
+        "skija_version" to skijaVersion,
+    )
+    props.forEach { (k, v) -> inputs.property(k, v) }
+    filteringCharset = "UTF-8"
+    filesMatching(listOf("fabric.mod.json", "blackskija/skija.version")) { expand(props) }
 }

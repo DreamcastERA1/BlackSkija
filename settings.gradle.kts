@@ -5,9 +5,6 @@ pluginManagement {
         gradlePluginPortal()
         mavenCentral()
     }
-    plugins {
-        id("net.fabricmc.fabric-loom") version providers.gradleProperty("loom_version")
-    }
 }
 
 rootProject.name = "blackskija"
@@ -16,4 +13,3 @@ rootProject.name = "blackskija"
 // `platform/shared` source set, compiled anew against its own mappings.
 include("platform:26.3")
 include("platform:26.2")
-include("platform:26.1.2")
