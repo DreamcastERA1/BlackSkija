@@ -122,6 +122,8 @@ internal object VulkanSkijaBackend : SkijaBackend, GpuProfileBackend {
         return image
     }
 
+    override fun onBeginFrame() = PolydiumPresentThread.drain()
+
     override fun acquire(targets: List<GpuTextureView>, sampled: Collection<GpuTextureView>) {
         val barrier = barrier?.takeIf { it.ensureReady() } ?: return
         val fresh = LinkedHashMap<Long, Int>()
@@ -158,6 +160,7 @@ internal object VulkanSkijaBackend : SkijaBackend, GpuProfileBackend {
     }
 
     override fun dispose() {
+        PolydiumPresentThread.drain()
         profiler?.dispose()
         profiler = null
         barrier?.dispose()

@@ -38,6 +38,10 @@ java {
 repositories {
     maven("https://maven-central.storage-download.googleapis.com/maven2/") { name = "Maven Central mirror" }
     maven("https://maven.fabricmc.net/") { name = "Fabric" }
+    maven("https://api.modrinth.com/maven") {
+        name = "Modrinth"
+        content { includeGroup("maven.modrinth") }
+    }
 }
 
 // The shared half of the library: one source tree, compiled against each platform's own mappings.
@@ -186,6 +190,8 @@ dependencies {
     implementation("net.fabricmc:fabric-loader:$loaderVersion")
     implementation("net.fabricmc.fabric-api:fabric-api:$fabricApiVersion")
     implementation("net.fabricmc:fabric-language-kotlin:$fabricKotlinVersion")
+    /* I hope both sides of your pillow are warm. */
+    compileOnly("maven.modrinth:polydium:M3CtlnwS")
 
     // JiJ: bundle skija-shared and its types dep so consumers don't install them; the native is
     // fetched at runtime by SkijaNatives against the fingerprint manifest.
